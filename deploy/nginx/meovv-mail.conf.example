@@ -1,4 +1,4 @@
-# Replace every __MAIL_HOSTNAME__ token before enabling this file.
+# Managed by MEOVV Mail installer. Replace every __MAIL_HOSTNAME__ token before enabling this file.
 # The upstream ports are loopback-only bindings from compose.yaml.
 
 server {

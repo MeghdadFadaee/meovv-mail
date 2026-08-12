@@ -8,6 +8,36 @@ the MEOVV Compose project. Compose publishes two HTTP upstreams on loopback:
 
 Mail protocols remain directly exposed by Stalwart on 25, 465, 587, and 993.
 
+## Automated host setup
+
+On a fresh supported server, the repository installer performs the host steps
+documented below without putting Nginx or Certbot inside Compose:
+
+```bash
+sudo ./scripts/install-server.sh install \
+  --hostname mail.example.com \
+  --email admin@example.com
+```
+
+Run it from the cloned repository root, or pass the repository's absolute path
+with `--bundle-dir`. It supports Ubuntu 24.04 and Debian 13. Before running it,
+point the hostname's A/AAAA record at the server and allow inbound port 80. The
+script obtains a certificate using Certbot's webroot flow, enables the final
+route split, copies the certificate into MEOVV's protected secrets directory,
+installs the renewal hook, and starts both containers.
+
+It deliberately leaves DNS, PTR records, provider firewall rules, SSH, and UFW
+to the operator. It also stops when it finds a conflicting unmanaged Nginx site
+or container package rather than replacing an existing setup. After the browser
+wizard and permanent administrator verification, run:
+
+```bash
+sudo ./scripts/install-server.sh finalize
+```
+
+The rest of this document describes the same integration for manual installs
+and explains the files managed by the installer.
+
 ## Nginx
 
 Copy `deploy/nginx/meovv-mail.conf.example` into the host's Nginx configuration,
@@ -82,8 +112,10 @@ sudo install -m 0755 \
 The default hook expects the bundle at `/opt/meovv-mail`; set
 `MEOVV_BUNDLE_DIR` if it lives elsewhere. Certbot supplies `RENEWED_LINEAGE`.
 The hook copies only the certificate chain and private key, applies restrictive
-permissions, and restarts Stalwart if it is running. Nginx renewal/reload remains
-owned by your existing Certbot integration.
+permissions, and restarts Stalwart if it is running. When installed by
+`install-server.sh`, a managed wrapper also validates and reloads Nginx after a
+successful copy. Manual installations should retain their existing Nginx reload
+hook or add an equivalent one.
 
 Test the entire renewal path before production:
 

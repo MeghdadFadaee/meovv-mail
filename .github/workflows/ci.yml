@@ -44,6 +44,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Validate installer syntax
+        run: |
+          bash -n scripts/install-server.sh
+          sh -n deploy/certbot/deploy-hook.sh
       - name: Validate Compose configuration
         env:
           MAIL_HOSTNAME: mail.example.com

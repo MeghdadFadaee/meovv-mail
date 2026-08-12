@@ -46,6 +46,38 @@ Direct delivery also needs working reverse DNS and acceptable IP reputation. If 
 
 ## Install
 
+For a fresh Ubuntu 24.04 or Debian 13 server, clone this repository and run the
+host installer from the repository root. It installs Docker Engine with the
+Compose plugin, Nginx, Certbot, and required host utilities; initializes MEOVV;
+obtains the first Let's Encrypt certificate; installs renewal and proxy
+configuration; and starts the appliance:
+
+```bash
+sudo ./scripts/install-server.sh install \
+  --hostname mail.example.com \
+  --email admin@example.com
+```
+
+The hostname's A/AAAA record must already point to the server and inbound port
+80 must be reachable so Let's Encrypt can issue the certificate. The installer
+does not change DNS, PTR, provider firewall rules, SSH, or UFW. It detects
+unmanaged Nginx hostname conflicts and conflicting Docker packages instead of
+overwriting or removing them. Use `--yes` only for a reviewed, non-interactive
+installation.
+
+Visit the printed HTTPS URL and complete the browser wizard. After creating and
+testing a permanent administrator, finish the security setup:
+
+```bash
+sudo ./scripts/install-server.sh finalize
+sudo ./scripts/install-server.sh status
+```
+
+See [`docs/nginx-certbot.md`](docs/nginx-certbot.md) for the generated routing
+and certificate layout, renewal behavior, customization, and manual setup.
+
+### Manual installation
+
 Build the local operator utility and initialize the bundle:
 
 ```bash
