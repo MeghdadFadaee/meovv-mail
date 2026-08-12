@@ -18,7 +18,7 @@ COPY internal ./internal
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/meovv-mail ./cmd/meovv-mail && \
     CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/mailctl ./cmd/mailctl
 
-FROM alpine:3.22
+FROM alpine:3.24
 RUN apk add --no-cache ca-certificates tzdata && addgroup -S -g 2001 meovv && adduser -S -D -H -u 2001 -G meovv meovv
 COPY --from=go-builder /out/meovv-mail /usr/local/bin/meovv-mail
 COPY --from=go-builder /out/mailctl /usr/local/bin/mailctl
