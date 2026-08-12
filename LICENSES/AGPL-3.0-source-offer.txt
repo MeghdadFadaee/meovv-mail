@@ -1,0 +1,11 @@
+Stalwart Mail Server v0.16.17 is distributed unmodified under the GNU Affero
+General Public License, version 3. The complete corresponding source for the
+exact distributed version is available at:
+
+https://github.com/stalwartlabs/stalwart/tree/v0.16.17
+
+The image digest used by this release is:
+sha256:a8108e19bd927e172d4d8c128907b8dfc93fd180ae8ee07dccdd42cb97eb9dfa
+
+This notice does not replace the license text or legal review required for a
+customer distribution.

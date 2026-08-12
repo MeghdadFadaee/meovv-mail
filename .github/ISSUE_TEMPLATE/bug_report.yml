@@ -1,0 +1,49 @@
+name: Bug report
+description: Report a reproducible problem in MEOVV Mail
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Do not report vulnerabilities or include credentials, message content, or customer data here. Use the private process in SECURITY.md.
+  - type: input
+    id: version
+    attributes:
+      label: MEOVV Mail version or commit
+      placeholder: v0.1.0 or commit SHA
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Ubuntu 24.04 amd64
+        - Ubuntu 24.04 arm64
+        - Debian 13 amd64
+        - Debian 13 arm64
+        - Development workstation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Include expected behavior and sanitized reproduction steps.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Sanitized diagnostics
+      description: Include relevant `mailctl doctor` results or logs after removing sensitive data.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Safety checks
+      options:
+        - label: I removed credentials, domains, IP addresses, mailbox content, and customer information.
+          required: true
+        - label: This is not a security vulnerability.
+          required: true

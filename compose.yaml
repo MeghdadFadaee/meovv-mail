@@ -1,0 +1,86 @@
+name: meovv-mail
+
+services:
+  caddy:
+    image: caddy:2.10.2-alpine
+    restart: unless-stopped
+    environment:
+      MAIL_HOSTNAME: ${MAIL_HOSTNAME:?Set MAIL_HOSTNAME in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [mail]
+    depends_on:
+      meovv:
+        condition: service_healthy
+      stalwart:
+        condition: service_started
+
+  meovv:
+    build:
+      context: .
+    image: meovv-mail:${MEOVV_VERSION:-0.1.0}
+    restart: unless-stopped
+    environment:
+      MEOVV_ADDR: :8080
+      MEOVV_DATA_DIR: /var/lib/meovv-mail
+      MEOVV_PUBLIC_URL: https://${MAIL_HOSTNAME}
+      MEOVV_BOOTSTRAP_TOKEN_FILE: /run/secrets/bootstrap_token
+      MEOVV_INTERNAL_WEBHOOK_SECRET_FILE: /run/secrets/internal_webhook_secret
+      MEOVV_SESSION_KEY_FILE: /run/secrets/session_key
+      STALWART_URL: https://stalwart:443
+      STALWART_BOOTSTRAP_URL: http://stalwart:8080
+      STALWART_TLS_INSECURE: "true"
+      STALWART_RECOVERY_ADMIN: ${STALWART_RECOVERY_ADMIN:-}
+      STALWART_SMTP_ADDRESS: stalwart:587
+      STALWART_TLS_SERVER_NAME: ${MAIL_HOSTNAME}
+      STALWART_SMTP_USERNAME: ${API_SUBMISSION_USER:-}
+      STALWART_SMTP_PASSWORD_FILE: /run/secrets/api_submission_password
+    volumes:
+      - meovv_data:/var/lib/meovv-mail
+      - ./secrets:/run/secrets:ro
+    networks: [mail]
+    depends_on:
+      stalwart:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/health/live"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+
+  stalwart:
+    image: stalwartlabs/stalwart:v0.16.17@sha256:a8108e19bd927e172d4d8c128907b8dfc93fd180ae8ee07dccdd42cb97eb9dfa
+    restart: unless-stopped
+    environment:
+      STALWART_PUBLIC_URL: https://${MAIL_HOSTNAME}
+      STALWART_RECOVERY_ADMIN: ${STALWART_RECOVERY_ADMIN:-}
+    ports:
+      - "25:25"
+      - "465:465"
+      - "587:587"
+      - "993:993"
+    volumes:
+      - stalwart_config:/etc/stalwart
+      - stalwart_data:/var/lib/stalwart
+    networks: [mail]
+
+networks:
+  mail:
+    driver: bridge
+
+volumes:
+  caddy_data:
+    name: meovv-mail-caddy-data
+  caddy_config:
+    name: meovv-mail-caddy-config
+  meovv_data:
+    name: meovv-mail-app-data
+  stalwart_config:
+    name: meovv-mail-stalwart-config
+  stalwart_data:
+    name: meovv-mail-stalwart-data

@@ -1,0 +1,47 @@
+# Dependencies and generated frontend output
+/node_modules/
+/web-dist/
+/dist/
+/coverage/
+*.tsbuildinfo
+
+# Runtime state and credentials
+.env
+.env.*
+!.env.example
+/secrets/
+/data/
+/backups/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.pem
+*.key
+
+# Local binaries and diagnostic output
+/mailctl
+/meovv-mail
+/outputs/
+/work/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+
+# Legacy/local preview tooling
+/.next/
+/.vinext/
+/.wrangler/
+/.openai/
+/public/

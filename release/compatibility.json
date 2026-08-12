@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "issued_at": "2026-08-12T00:00:00Z",
+  "meovv_version": "0.1.0",
+  "stalwart": {
+    "version": "0.16.17",
+    "image": "stalwartlabs/stalwart:v0.16.17",
+    "digest": "sha256:a8108e19bd927e172d4d8c128907b8dfc93fd180ae8ee07dccdd42cb97eb9dfa"
+  },
+  "platforms": [
+    "linux/amd64",
+    "linux/arm64"
+  ]
+}

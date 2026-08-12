@@ -1,0 +1,228 @@
+openapi: 3.1.0
+info:
+  title: MEOVV Mail Send API
+  version: 1.0.0
+  description: |
+    Submit application email and inspect destination-server acceptance state.
+    A `delivered` result means that the destination mail server accepted the
+    message; it does not mean that a person opened or read it.
+servers:
+  - url: https://mail.example.com
+security:
+  - bearerAuth: []
+paths:
+  /api/v1/messages:
+    post:
+      operationId: submitMessage
+      summary: Submit a message
+      description: Requires `messages.send`. A key may only use its approved sender identities.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitMessage'
+            examples:
+              welcome:
+                value:
+                  from: Notifications <notifications@example.com>
+                  to: [person@example.net]
+                  subject: Welcome
+                  text: Welcome to our service.
+                  html: <p>Welcome to our service.</p>
+      responses:
+        '202':
+          description: Accepted by the local submission service.
+          headers:
+            Location:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SubmissionReceipt' }
+              example:
+                id: msg_E6uFQ2YfANvHfZrC
+                status: queued
+                submitted_at: '2026-08-12T08:30:00Z'
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '429':
+          description: Per-key submission limit exceeded.
+          headers:
+            Retry-After:
+              schema: { type: integer }
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+    get:
+      operationId: listMessages
+      summary: List message status history
+      description: Requires `messages.status`. Results are restricted to the calling API key.
+      parameters:
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/MessageState' } }
+        - { name: sender, in: query, schema: { type: string, format: email } }
+        - { name: recipient, in: query, schema: { type: string, format: email } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+      responses:
+        '200':
+          description: Cursor-paginated messages.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/MessageStatus' } }
+                  next_cursor: { type: [string, 'null'] }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /api/v1/messages/{id}:
+    get:
+      operationId: getMessage
+      summary: Read overall and per-recipient delivery state
+      description: Requires `messages.status`; only the API key that submitted the message may read it.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, pattern: '^msg_' }
+      responses:
+        '200':
+          description: Current delivery state.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MessageStatus' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+webhooks:
+  deliveryEvent:
+    post:
+      summary: Versioned at-least-once delivery event
+      description: |
+        Verify `X-MEOVV-Signature` as HMAC-SHA256 over
+        `{X-MEOVV-Timestamp}.{raw_body}`. Event IDs stay constant across retries.
+        Duplicates and cross-message reordering are possible.
+      parameters:
+        - { name: X-MEOVV-Timestamp, in: header, required: true, schema: { type: string } }
+        - { name: X-MEOVV-Signature, in: header, required: true, schema: { type: string, pattern: '^v1=' } }
+        - { name: X-MEOVV-Event-ID, in: header, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WebhookEvent' }
+      responses:
+        '204': { description: Event accepted. }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: MEOVV API key
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      description: Replays the original receipt for 24 hours; re-use with different content is rejected.
+      schema: { type: string, minLength: 1, maxLength: 255 }
+  responses:
+    Problem:
+      description: Request failed.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    SubmitMessage:
+      type: object
+      required: [from, to, subject]
+      anyOf:
+        - required: [text]
+        - required: [html]
+      properties:
+        from: { type: string, description: Must match a sender identity approved for the API key. }
+        to: { type: array, maxItems: 100, items: { type: string, format: email } }
+        cc: { type: array, items: { type: string, format: email } }
+        bcc: { type: array, items: { type: string, format: email } }
+        reply_to: { type: string, format: email }
+        subject: { type: string }
+        text: { type: string }
+        html: { type: string }
+        headers:
+          type: object
+          additionalProperties: { type: string }
+          description: X-* headers plus List-Unsubscribe and List-Unsubscribe-Post.
+        attachments:
+          type: array
+          items:
+            type: object
+            required: [filename, content_base64]
+            properties:
+              filename: { type: string }
+              content_type: { type: string, default: application/octet-stream }
+              content_base64: { type: string, contentEncoding: base64 }
+      description: The decoded message may not exceed 25 MiB and all recipient fields combined may not exceed 100 addresses.
+    MessageState:
+      type: string
+      enum: [queued, processing, deferred, delivered, partial, bounced, failed]
+    RecipientState:
+      type: object
+      required: [address, status]
+      properties:
+        address: { type: string, format: email }
+        status: { type: string, enum: [queued, processing, deferred, delivered, bounced, failed] }
+        last_response: { type: string }
+        last_attempt_at: { type: [string, 'null'], format: date-time }
+    SubmissionReceipt:
+      type: object
+      required: [id, status, submitted_at]
+      properties:
+        id: { type: string }
+        status: { const: queued }
+        submitted_at: { type: string, format: date-time }
+    MessageStatus:
+      type: object
+      required: [id, sender, subject, status, submitted_at, recipients]
+      properties:
+        id: { type: string }
+        sender: { type: string }
+        subject: { type: string }
+        status: { $ref: '#/components/schemas/MessageState' }
+        size_bytes: { type: integer }
+        submitted_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        failure_reason: { type: string }
+        recipients: { type: array, items: { $ref: '#/components/schemas/RecipientState' } }
+    WebhookEvent:
+      type: object
+      required: [id, type, created_at, data]
+      properties:
+        id: { type: string }
+        type:
+          type: string
+          enum: [message.queued, message.delivered, message.deferred, message.bounced, message.failed]
+        created_at: { type: string, format: date-time }
+        data:
+          type: object
+          required: [message_id, status]
+          properties:
+            message_id: { type: string }
+            recipient: { type: [string, 'null'] }
+            status: { type: string }
+    Problem:
+      type: object
+      required: [type, title, status, detail, code]
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        code: { type: string }

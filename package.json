@@ -1,0 +1,42 @@
+{
+  "name": "meovv-mail-web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Web interface for the MEOVV Mail self-hosted email appliance",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "dev": "vite --config vite.frontend.config.ts",
+    "build": "vite build --config vite.frontend.config.ts",
+    "build:web": "npm run build",
+    "start": "vite preview --config vite.frontend.config.ts",
+    "test": "npm run build && node --test tests/rendered-html.test.mjs",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run lint && npm run typecheck && npm test"
+  },
+  "dependencies": {
+    "dompurify": "^3.4.13",
+    "lucide-react": "^1.31.0",
+    "react": "19.2.6",
+    "react-dom": "19.2.6"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.4",
+    "@types/node": "22.19.19",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.2",
+    "eslint": "9.39.4",
+    "eslint-plugin-jsx-a11y": "6.10.2",
+    "eslint-plugin-react": "7.37.5",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "globals": "16.4.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.59.3",
+    "vite": "8.2.1"
+  },
+  "type": "module"
+}
