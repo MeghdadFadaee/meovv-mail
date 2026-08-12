@@ -19,7 +19,8 @@ corrections are welcome while that policy is finalized.
 
 ## Development checks
 
-Install Node.js 22+, Go 1.24+, and Docker with Compose. Then run:
+Install Node.js 22+, Go 1.24+, and Docker with Compose. Production deployments
+also require host-managed Nginx and Certbot. Then run:
 
 ```bash
 npm ci

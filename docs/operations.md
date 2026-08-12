@@ -4,9 +4,17 @@
 
 Direct delivery is the default. Use it only when the host has a stable public IP, outbound TCP 25, correct PTR, and an IP range suitable for email. Relay mode sends through an authenticated TLS smart host and is the supported fallback. Changing mode does not require reinstalling; update the delivery configuration and run diagnostics before switching traffic.
 
+## Edge proxy and certificates
+
+Nginx and Certbot are operated outside Compose. The required path split,
+loopback bindings, initial certificate registration, and renewal hook are in
+[`nginx-certbot.md`](nginx-certbot.md). After every Nginx or certificate-policy
+change, verify HTTPS plus TLS on ports 465 and 993; success on HTTPS alone does
+not prove mail clients receive the renewed certificate.
+
 ## Backups and restore drills
 
-`mailctl backup` stops the two data writers, archives every named volume and the host configuration/secrets, computes checksums, and starts the services again. Copy the resulting directory to storage that is encrypted, access-controlled, and separate from the mail host.
+`mailctl backup` stops the two data writers, archives the three appliance volumes and appliance configuration/secrets, computes checksums, and starts the services again. Nginx configuration and the canonical Certbot lineage are external host state and must be covered by the host's backup policy. Copy the resulting directory to storage that is encrypted, access-controlled, and separate from the mail host.
 
 Run a restore drill for every release:
 

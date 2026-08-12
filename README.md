@@ -4,7 +4,7 @@
 
 MEOVV Mail is a single-tenant, self-hosted email appliance for one organization.
 It combines a polished web inbox and administration experience with a pinned Stalwart mail core,
-a Go control plane, and automatic HTTPS through Caddy.
+a Go control plane, and your host-managed Nginx and Certbot edge.
 
 > [!IMPORTANT]
 > MEOVV Mail is pre-1.0 software under active development. The architecture,
@@ -19,11 +19,15 @@ and a scoped REST send API. POP3 and plaintext IMAP are not published.
 
 ## Architecture
 
-The production bundle runs exactly three containers:
+The production bundle runs exactly two containers:
 
-- `caddy` terminates public TLS, publishes discovery routes, and sends product traffic to MEOVV.
 - `meovv` serves the web application, encrypted OAuth sessions, REST API, setup, delivery metadata, webhook jobs, audit events, and operational endpoints.
 - `stalwart` stores accounts and all mailbox data and provides SMTP, IMAP, JMAP, filtering, queues, and delivery telemetry.
+
+Nginx and Certbot remain host infrastructure outside Compose. Nginx terminates
+HTTPS and routes loopback-only upstreams to the two services. Stalwart receives
+a controlled copy of the Certbot certificate for SMTP and IMAP TLS. See
+[`docs/nginx-certbot.md`](docs/nginx-certbot.md).
 
 Stalwart is pinned to `v0.16.17` and multi-architecture digest `sha256:a8108e19bd927e172d4d8c128907b8dfc93fd180ae8ee07dccdd42cb97eb9dfa`.
 Mail bodies and attachments never enter the MEOVV SQLite database.
@@ -32,6 +36,7 @@ Mail bodies and attachments never enter the MEOVV SQLite database.
 
 - Ubuntu 24.04 or Debian 13 on amd64 or arm64
 - Docker Engine with the Compose plugin
+- Host-managed Nginx and Certbot
 - 4 vCPU, 8 GB RAM, and SSD storage for the reference 500-account deployment
 - A public static IP and control of DNS for direct delivery
 - Inbound TCP 25, 80, 443, 465, 587, and 993
@@ -41,20 +46,29 @@ Direct delivery also needs working reverse DNS and acceptable IP reputation. If 
 
 ## Install
 
-Build the local operator utility, initialize the bundle, and start it:
+Build the local operator utility and initialize the bundle:
 
 ```bash
 go build -o mailctl ./cmd/mailctl
 ./mailctl init --hostname mail.example.com
-docker compose up -d --build
 ```
 
-`mailctl init` prints a one-time browser bootstrap token and temporary Stalwart recovery credential. Store both securely. Visit `https://mail.example.com`, complete the three-step wizard, and save the one-time result shown on the final screen.
+`mailctl init` prints a one-time browser bootstrap token and temporary Stalwart
+recovery credential. Store both securely. Next, issue the hostname certificate,
+install the provided Nginx route split, and copy the Certbot lineage by following
+[`docs/nginx-certbot.md`](docs/nginx-certbot.md). Then start the appliance:
+
+```bash
+docker compose up -d --build --remove-orphans
+```
+
+Visit `https://mail.example.com`, complete the three-step wizard, and save the
+one-time result shown on the final screen.
 
 After setup:
 
 ```bash
-docker compose restart stalwart meovv
+./mailctl configure-tls
 ./mailctl doctor --hostname mail.example.com
 ```
 
@@ -109,7 +123,7 @@ Create a consistency-safe backup:
 ./mailctl backup
 ```
 
-The command stops Stalwart and MEOVV writers, archives all five named volumes plus Compose configuration and secrets, writes SHA-256 checksums, and restarts the services. Restore is intentionally destructive and only accepts a backup from the same MEOVV and Stalwart release:
+The command stops Stalwart and MEOVV writers, archives all three named volumes plus Compose configuration and secrets, writes SHA-256 checksums, and restarts the services. Host-managed Nginx and Certbot configuration remains part of the host backup policy. Restore is intentionally destructive and only accepts a backup from the same MEOVV and Stalwart release:
 
 ```bash
 ./mailctl restore --from backups/20260812T103000Z --yes

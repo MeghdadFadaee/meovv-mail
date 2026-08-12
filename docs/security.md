@@ -11,14 +11,19 @@
 - Email HTML is sanitized, remote content is blocked by default, and attachment filenames are reduced to safe basenames.
 - Webhooks require public HTTPS and reject loopback, private, link-local, unspecified, and multicast resolutions.
 - External webhooks sign `{timestamp}.{raw_body}` with HMAC-SHA256 and retain event IDs across retries.
-- Caddy adds HSTS; the application adds CSP, anti-framing, MIME-sniffing, referrer, and permissions policies.
+- The provided Nginx template adds HSTS and response hardening; the application adds CSP, anti-framing, MIME-sniffing, referrer, and permissions policies.
 - Only 25, 465, 587, and 993 are published for mail. POP3 and plaintext IMAP are absent.
 
 ## Deployment invariants
 
 Before exposure, confirm that unauthenticated SMTP cannot relay to a third-party domain, sender authorization is enforced on submission, recovery administrator access is removed, and Stalwart's spam/phishing, SPF, DKIM, DMARC, TLS, abuse-ban, and rate-limit defaults remain enabled.
 
-The internal Docker network is not a trust substitute. Stalwart delivery events use a separate shared HMAC secret. The Stalwart management API is not routed publicly by Caddy; administrators use the authenticated Go adapter.
+The internal Docker network is not a trust substitute. Stalwart delivery events use a separate shared HMAC secret. The Stalwart management API is not routed publicly by Nginx; administrators use the authenticated Go adapter. Compose binds recovery HTTP to loopback only, and `mailctl configure-tls` rejects non-loopback management URLs before sending the temporary recovery credential.
+
+The operator must configure Stalwart to trust forwarded HTTP headers only from
+the exact Docker bridge used by the host Nginx connection. Never trust arbitrary
+public networks, and never publish the Stalwart HTTP binding on a non-loopback
+host address.
 
 ## Audit and response
 

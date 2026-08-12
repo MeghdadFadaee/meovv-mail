@@ -2,6 +2,7 @@ package main
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"crypto/ed25519"
@@ -15,6 +16,8 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -35,8 +38,6 @@ const (
 )
 
 var volumeArchives = map[string]string{
-	"meovv-mail-caddy-data":      "caddy-data.tgz",
-	"meovv-mail-caddy-config":    "caddy-config.tgz",
 	"meovv-mail-app-data":        "meovv-data.tgz",
 	"meovv-mail-stalwart-config": "stalwart-config.tgz",
 	"meovv-mail-stalwart-data":   "stalwart-data.tgz",
@@ -63,6 +64,8 @@ func main() {
 		err = doctor(os.Args[2:])
 	case "create-api-key":
 		err = createAPIKey(os.Args[2:])
+	case "configure-tls":
+		err = configureTLS(os.Args[2:])
 	case "backup":
 		err = backup(os.Args[2:])
 	case "restore":
@@ -94,6 +97,7 @@ Usage: mailctl <command> [options]
   init             Create .env and one-time installation secrets
   doctor           Check DNS, ports, files, and the running appliance
   create-api-key   Create a hashed REST API key (run inside app container)
+  configure-tls    Register the Certbot certificate with Stalwart
   backup           Stop mail writers and create a checksummed backup
   restore          Verify and restore a same-release backup
   upgrade          Verify compatibility, back up, and apply an approved release
@@ -126,6 +130,9 @@ func initialize(args []string) error {
 	if err = os.MkdirAll(secretDir, 0o700); err != nil {
 		return err
 	}
+	if err = os.MkdirAll(filepath.Join(secretDir, "tls"), 0o700); err != nil {
+		return err
+	}
 	values := map[string]string{
 		"bootstrap_token":         randomSecret(32),
 		"session_key":             randomSecret(32),
@@ -138,11 +145,11 @@ func initialize(args []string) error {
 		}
 	}
 	recovery := "admin:" + randomSecret(24)
-	env := fmt.Sprintf("MEOVV_VERSION=%s\nMAIL_HOSTNAME=%s\nSTALWART_RECOVERY_ADMIN=%s\nAPI_SUBMISSION_USER=api-sender@%s\n", version, *hostname, recovery, strings.TrimPrefix(*hostname, "mail."))
+	env := fmt.Sprintf("MEOVV_VERSION=%s\nMAIL_HOSTNAME=%s\nMEOVV_HTTP_BIND=127.0.0.1:8080\nSTALWART_HTTP_BIND=127.0.0.1:8081\nSTALWART_RECOVERY_ADMIN=%s\nAPI_SUBMISSION_USER=api-sender@%s\n", version, *hostname, recovery, strings.TrimPrefix(*hostname, "mail."))
 	if err = writeExclusive(filepath.Join(root, ".env"), []byte(env), 0o600); err != nil {
 		return err
 	}
-	fmt.Printf("Initialized %s\nBootstrap token: %s\nTemporary Stalwart recovery user: admin\nTemporary Stalwart recovery password: %s\n\nStore these values securely. Run 'docker compose up -d --build', complete setup, create a permanent administrator, then run 'mailctl harden'.\n", root, values["bootstrap_token"], strings.TrimPrefix(recovery, "admin:"))
+	fmt.Printf("Initialized %s\nBootstrap token: %s\nTemporary Stalwart recovery user: admin\nTemporary Stalwart recovery password: %s\n\nStore these values securely. Configure host Nginx/Certbot, run 'docker compose up -d --build --remove-orphans', complete setup, then run 'mailctl configure-tls' before 'mailctl harden'.\n", root, values["bootstrap_token"], strings.TrimPrefix(recovery, "admin:"))
 	return nil
 }
 
@@ -171,6 +178,12 @@ func doctor(args []string) error {
 	check("Compose bundle", err)
 	_, err = os.Stat(filepath.Join(root, "secrets", "session_key"))
 	check("Secrets", err)
+	_, err = os.Stat(filepath.Join(root, "secrets", "tls", "fullchain.pem"))
+	check("TLS certificate", err)
+	_, err = os.Stat(filepath.Join(root, "secrets", "tls", "privkey.pem"))
+	check("TLS private key", err)
+	_, err = os.Stat(filepath.Join(root, "secrets", "tls", "certificate_id"))
+	check("Stalwart TLS link", err)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	addresses, err := net.DefaultResolver.LookupHost(ctx, *hostname)
@@ -234,6 +247,183 @@ func createAPIKey(args []string) error {
 	}
 	fmt.Printf("API key created. Copy it now; it cannot be recovered.\n%s\n", secret)
 	return nil
+}
+
+func configureTLS(args []string) error {
+	fs := flag.NewFlagSet("configure-tls", flag.ContinueOnError)
+	dir := fs.String("directory", ".", "Compose bundle directory")
+	endpoint := fs.String("url", "http://127.0.0.1:8081/api", "loopback Stalwart management endpoint")
+	certificatePath := fs.String("certificate-path", "/etc/stalwart/tls/fullchain.pem", "certificate path inside the Stalwart container")
+	privateKeyPath := fs.String("private-key-path", "/etc/stalwart/tls/privkey.pem", "private key path inside the Stalwart container")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	root, _ := filepath.Abs(*dir)
+	managementURL, err := url.Parse(*endpoint)
+	if err != nil || managementURL.Scheme != "http" || managementURL.Path != "/api" || managementURL.User != nil || managementURL.RawQuery != "" || managementURL.Fragment != "" {
+		return errors.New("--url must be a loopback HTTP URL ending in /api")
+	}
+	managementHost := managementURL.Hostname()
+	managementIP := net.ParseIP(managementHost)
+	if managementHost != "localhost" && (managementIP == nil || !managementIP.IsLoopback()) {
+		return errors.New("--url must use localhost or a loopback IP so the recovery credential is never sent over a network")
+	}
+	for _, name := range []string{"fullchain.pem", "privkey.pem"} {
+		if _, err := os.Stat(filepath.Join(root, "secrets", "tls", name)); err != nil {
+			return fmt.Errorf("secrets/tls/%s is unavailable; copy the Certbot lineage first: %w", name, err)
+		}
+	}
+	env, err := readEnv(filepath.Join(root, ".env"))
+	if err != nil {
+		return err
+	}
+	recovery := env["STALWART_RECOVERY_ADMIN"]
+	if parts := strings.SplitN(recovery, ":", 2); len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return errors.New("STALWART_RECOVERY_ADMIN is required; run configure-tls before mailctl harden")
+	}
+	idPath := filepath.Join(root, "secrets", "tls", "certificate_id")
+	idBytes, readErr := os.ReadFile(idPath)
+	certificateID := strings.TrimSpace(string(idBytes))
+	certificate := map[string]any{"@type": "File", "filePath": *certificatePath}
+	privateKey := map[string]any{"@type": "File", "filePath": *privateKeyPath}
+	var payload map[string]any
+	creating := errors.Is(readErr, os.ErrNotExist) || certificateID == ""
+	if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
+		return readErr
+	}
+	if creating {
+		payload = jmapPayload("x:Certificate/set", map[string]any{"create": map[string]any{"certbot": map[string]any{"certificate": certificate, "privateKey": privateKey}}}, "certificate")
+	} else {
+		payload = jmapPayload("x:Certificate/set", map[string]any{"update": map[string]any{certificateID: map[string]any{"certificate": certificate, "privateKey": privateKey}}}, "certificate")
+	}
+	raw, err := callStalwart(*endpoint, recovery, payload)
+	if err != nil {
+		return err
+	}
+	if creating {
+		certificateID, err = createdObjectID(raw, "certbot")
+	} else {
+		err = jmapSucceeded(raw)
+	}
+	if err != nil {
+		return fmt.Errorf("register Certbot certificate: %w", err)
+	}
+	if creating {
+		if err = writeExclusive(idPath, []byte(certificateID+"\n"), 0o600); err != nil {
+			return err
+		}
+	}
+	payload = jmapPayload("x:SystemSettings/set", map[string]any{"update": map[string]any{"singleton": map[string]any{"defaultCertificateId": certificateID}}}, "settings")
+	raw, err = callStalwart(*endpoint, recovery, payload)
+	if err != nil {
+		return err
+	}
+	if err = jmapSucceeded(raw); err != nil {
+		return fmt.Errorf("select default certificate: %w", err)
+	}
+	if err = run(root, "docker", "compose", "restart", "stalwart"); err != nil {
+		return fmt.Errorf("certificate registered, but Stalwart could not be restarted: %w", err)
+	}
+	fmt.Println("Certbot certificate registered as Stalwart's default TLS certificate.")
+	return nil
+}
+
+func jmapPayload(method string, arguments map[string]any, callID string) map[string]any {
+	return map[string]any{
+		"using":       []string{"urn:ietf:params:jmap:core", "urn:stalwart:jmap"},
+		"methodCalls": []any{[]any{method, arguments, callID}},
+	}
+}
+
+func callStalwart(endpoint, recovery string, payload any) ([]byte, error) {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(raw))
+	if err != nil {
+		return nil, err
+	}
+	parts := strings.SplitN(recovery, ":", 2)
+	req.SetBasicAuth(parts[0], parts[1])
+	req.Header.Set("Content-Type", "application/json")
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	client := &http.Client{
+		Timeout:   20 * time.Second,
+		Transport: transport,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	response, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("contact Stalwart management endpoint: %w", err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+	if err != nil {
+		return nil, err
+	}
+	if response.StatusCode/100 != 2 {
+		return nil, fmt.Errorf("Stalwart returned %s: %s", response.Status, strings.TrimSpace(string(body)))
+	}
+	return body, nil
+}
+
+func jmapMethodBody(raw []byte) (string, json.RawMessage, error) {
+	var response struct {
+		MethodResponses [][]json.RawMessage `json:"methodResponses"`
+	}
+	if err := json.Unmarshal(raw, &response); err != nil {
+		return "", nil, err
+	}
+	if len(response.MethodResponses) != 1 || len(response.MethodResponses[0]) < 2 {
+		return "", nil, fmt.Errorf("unexpected JMAP response: %s", strings.TrimSpace(string(raw)))
+	}
+	var method string
+	if err := json.Unmarshal(response.MethodResponses[0][0], &method); err != nil {
+		return "", nil, err
+	}
+	return method, response.MethodResponses[0][1], nil
+}
+
+func jmapSucceeded(raw []byte) error {
+	method, body, err := jmapMethodBody(raw)
+	if err != nil {
+		return err
+	}
+	if method == "error" || bytes.Contains(body, []byte(`"notUpdated"`)) || bytes.Contains(body, []byte(`"notCreated"`)) {
+		return fmt.Errorf("Stalwart rejected the change: %s", strings.TrimSpace(string(body)))
+	}
+	return nil
+}
+
+func createdObjectID(raw []byte, clientID string) (string, error) {
+	method, body, err := jmapMethodBody(raw)
+	if err != nil {
+		return "", err
+	}
+	if method == "error" {
+		return "", fmt.Errorf("Stalwart rejected the change: %s", strings.TrimSpace(string(body)))
+	}
+	var result struct {
+		Created map[string]struct {
+			ID string `json:"id"`
+		} `json:"created"`
+		NotCreated map[string]json.RawMessage `json:"notCreated"`
+	}
+	if err = json.Unmarshal(body, &result); err != nil {
+		return "", err
+	}
+	if failure := result.NotCreated[clientID]; len(failure) > 0 {
+		return "", fmt.Errorf("Stalwart rejected the certificate: %s", strings.TrimSpace(string(failure)))
+	}
+	id := result.Created[clientID].ID
+	if id == "" {
+		return "", fmt.Errorf("certificate id missing from response: %s", strings.TrimSpace(string(body)))
+	}
+	return id, nil
 }
 
 func backup(args []string) error {
@@ -306,7 +496,7 @@ func restore(args []string) error {
 	if manifest.MEOVVVersion != version || manifest.StalwartVersion != stalwartVersion {
 		return fmt.Errorf("backup release is MEOVV %s / Stalwart %s; this binary is %s / %s", manifest.MEOVVVersion, manifest.StalwartVersion, version, stalwartVersion)
 	}
-	if err = run(root, "docker", "compose", "stop", "meovv", "stalwart", "caddy"); err != nil {
+	if err = run(root, "docker", "compose", "stop", "meovv", "stalwart"); err != nil {
 		return err
 	}
 	for volume, archive := range volumeArchives {
@@ -469,7 +659,7 @@ func archiveConfiguration(root, destination string) error {
 	defer gz.Close()
 	tw := tar.NewWriter(gz)
 	defer tw.Close()
-	paths := []string{".env", "compose.yaml", "deploy/caddy/Caddyfile"}
+	paths := []string{".env", "compose.yaml"}
 	_ = filepath.WalkDir(filepath.Join(root, "secrets"), func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr == nil && !entry.IsDir() {
 			rel, _ := filepath.Rel(root, path)
@@ -522,7 +712,7 @@ func restoreConfiguration(root, archive string) error {
 			return err
 		}
 		clean := filepath.Clean(header.Name)
-		if filepath.IsAbs(clean) || strings.HasPrefix(clean, "..") || (clean != ".env" && clean != "compose.yaml" && clean != "deploy/caddy/Caddyfile" && !strings.HasPrefix(clean, "secrets/")) {
+		if filepath.IsAbs(clean) || strings.HasPrefix(clean, "..") || (clean != ".env" && clean != "compose.yaml" && !strings.HasPrefix(clean, "secrets/")) {
 			return fmt.Errorf("unsafe configuration archive entry %q", header.Name)
 		}
 		target := filepath.Join(root, clean)

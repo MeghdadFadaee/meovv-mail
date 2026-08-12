@@ -20,7 +20,7 @@ type Client struct {
 
 func New(base string, insecure bool) *Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: insecure} // Internal Docker TLS; public TLS terminates at Caddy.
+	transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: insecure} // #nosec G402 -- explicitly controlled for deployments that re-encrypt to a private Stalwart endpoint.
 	return &Client{BaseURL: strings.TrimRight(base, "/"), HTTP: &http.Client{Timeout: 15 * time.Second, Transport: transport}}
 }
 
@@ -32,7 +32,7 @@ func (c *Client) Bootstrap(ctx context.Context, bootstrapURL, recoveryAdmin, hos
 	payload := map[string]any{
 		"using": []string{"urn:ietf:params:jmap:core", "urn:stalwart:jmap"},
 		"methodCalls": []any{[]any{"x:Bootstrap/set", map[string]any{"update": map[string]any{"singleton": map[string]any{
-			"serverHostname": hostname, "defaultDomain": domain, "requestTlsCertificate": true, "generateDkimKeys": true,
+			"serverHostname": hostname, "defaultDomain": domain, "requestTlsCertificate": false, "generateDkimKeys": true,
 			"dataStore": map[string]any{"@type": "RocksDb", "path": "/var/lib/stalwart/"},
 			"blobStore": map[string]any{"@type": "Default"}, "searchStore": map[string]any{"@type": "Default"}, "inMemoryStore": map[string]any{"@type": "Default"},
 			"directory": map[string]any{"@type": "Internal"}, "tracer": map[string]any{"@type": "Console"}, "dnsServer": map[string]any{"@type": "Manual"},

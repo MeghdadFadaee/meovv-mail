@@ -2,9 +2,19 @@
 
 ## Trust and data boundaries
 
-Public HTTPS reaches Caddy first. Caddy sends product UI, session, administration, health, and REST API routes to the Go service. Standards discovery, OAuth authorization, public JMAP, mail-client configuration, and ACME challenge routes go to Stalwart. Mail protocols reach Stalwart directly on their dedicated TLS-capable ports, so Stalwart obtains its own certificate for SMTP and IMAP while Caddy independently manages the public web certificate.
+Public HTTPS reaches host-managed Nginx first. Nginx sends product UI, session,
+administration, health, and REST API routes to the loopback MEOVV upstream.
+Standards discovery, OAuth authorization, public JMAP, and mail-client
+configuration routes go to the loopback Stalwart HTTP upstream. Neither upstream
+port is publicly bound.
 
-The branded sign-in form posts the password directly to same-origin `/api/auth`, which Caddy routes to Stalwart. The browser creates a PKCE verifier and sends only the one-time authorization code and verifier to MEOVV. The Go service exchanges that code, encrypts access and refresh tokens with AES-GCM, and returns an opaque Secure, HttpOnly, SameSite cookie. User passwords are never sent to or persisted by MEOVV.
+Mail protocols reach Stalwart directly on their dedicated TLS-capable ports.
+Certbot remains the single certificate authority client: its deploy hook copies
+the hostname certificate into the appliance's protected `secrets/tls` directory.
+Stalwart loads that certificate through file-backed `Certificate` fields for
+SMTP and IMAP, while Nginx reads the original Certbot lineage for HTTPS.
+
+The branded sign-in form posts the password directly to same-origin `/api/auth`, which Nginx routes to Stalwart. The browser creates a PKCE verifier and sends only the one-time authorization code and verifier to MEOVV. The Go service exchanges that code, encrypts access and refresh tokens with AES-GCM, and returns an opaque Secure, HttpOnly, SameSite cookie. User passwords are never sent to or persisted by MEOVV.
 
 Authenticated browser JMAP calls go through `/api/mail/jmap`; discovery goes through `/api/mail/session`; the event stream uses `/api/mail/events`. The Stalwart adapter is the only Go package that knows these upstream routes, which contains pre-1.0 compatibility changes.
 

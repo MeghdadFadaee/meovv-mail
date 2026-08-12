@@ -14,11 +14,13 @@ test("builds the standalone MEOVV application shell", async () => {
 });
 
 test("includes production auth, JMAP, sanitization, and responsive UI paths", async () => {
-  const [page, css, openapi, standalone] = await Promise.all([
+  const [page, css, openapi, standalone, compose, nginx] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../api/openapi.yaml", import.meta.url), "utf8"),
     readFile(new URL("../web-dist/index.html", import.meta.url), "utf8"),
+    readFile(new URL("../compose.yaml", import.meta.url), "utf8"),
+    readFile(new URL("../deploy/nginx/meovv-mail.conf.example", import.meta.url), "utf8"),
   ]);
   assert.match(page, /crypto\.subtle\.digest\("SHA-256"/);
   assert.match(page, /fetch\("\/api\/auth"/);
@@ -33,4 +35,8 @@ test("includes production auth, JMAP, sanitization, and responsive UI paths", as
   assert.match(openapi, /Idempotency-Key/);
   assert.match(standalone, /<div id="root"><\/div>/);
   await access(new URL("../web-dist/assets", import.meta.url));
+  assert.match(compose, /127\.0\.0\.1:8080/);
+  assert.match(compose, /127\.0\.0\.1:8081/);
+  assert.match(nginx, /proxy_pass http:\/\/127\.0\.0\.1:8080/);
+  assert.match(nginx, /proxy_pass http:\/\/127\.0\.0\.1:8081/);
 });

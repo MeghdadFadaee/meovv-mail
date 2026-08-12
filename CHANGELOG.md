@@ -7,7 +7,8 @@ All notable project changes will be recorded here. This project follows
 
 ### Added
 
-- Initial three-container self-hosted appliance architecture.
+- Initial two-container self-hosted appliance architecture with external Nginx
+  and Certbot integration.
 - React/Vite mailbox, setup, authentication, and administration interfaces.
 - Go control plane, REST send API, JMAP session proxy, delivery events, and
   signed webhook delivery.
