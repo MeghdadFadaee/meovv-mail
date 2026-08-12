@@ -1,0 +1,71 @@
+# Replace every __MAIL_HOSTNAME__ token before enabling this file.
+# The upstream ports are loopback-only bindings from compose.yaml.
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name __MAIL_HOSTNAME__;
+
+    # Keep this location if Certbot uses the webroot authenticator.
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+        default_type text/plain;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name __MAIL_HOSTNAME__;
+
+    ssl_certificate /etc/letsencrypt/live/__MAIL_HOSTNAME__/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/__MAIL_HOSTNAME__/privkey.pem;
+
+    client_max_body_size 35m;
+
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    # Stalwart owns public discovery, OAuth, JMAP, and client-autoconfiguration
+    # routes. The HTTP upstream is safe because it is bound to loopback only.
+    location ~* ^/(?:\.well-known(?:/|$)|jmap(?:/|$)|auth(?:/|$)|api/(?:auth(?:/|$)|discover(?:/|$)|account(?:/|$)|token(?:/|$))|mail/config-v1\.1\.xml$|autodiscover(?:/|$)) {
+        proxy_pass http://127.0.0.1:8081;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 75s;
+    }
+
+    # JMAP push is proxied by MEOVV as a server-sent event stream.
+    location = /api/mail/events {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 75s;
+    }
+
+    # The product UI, sessions, REST API, administration, health, and metrics.
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 75s;
+    }
+}
