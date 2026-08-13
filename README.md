@@ -125,6 +125,33 @@ sudo ./scripts/install-server.sh status
 See [`docs/nginx-certbot.md`](docs/nginx-certbot.md) for the generated routing
 and certificate layout, renewal behavior, customization, and manual setup.
 
+### Uninstall
+
+The guarded uninstaller permanently removes the MEOVV containers, images,
+volumes, mailbox/application data, local backups, secrets, Nginx site, Certbot
+hook and certificate, and the host `mailctl`. It requires the mail hostname to
+be typed before deletion. It separately asks whether to purge Docker, Nginx,
+and Certbot APT packages and whether to delete the repository checkout:
+
+```bash
+sudo ./scripts/uninstall-server.sh
+```
+
+For reviewed non-interactive removal, choices must be explicit:
+
+```bash
+sudo ./scripts/uninstall-server.sh \
+  --bundle-dir /opt/meovv-mail \
+  --hostname mail.example.com \
+  --purge-packages \
+  --remove-bundle \
+  --yes
+```
+
+Package purging can affect other services using Docker, Nginx, or Certbot.
+The uninstaller never changes public DNS, PTR records, firewall rules, unrelated
+Nginx sites, unrelated Docker resources, or unrelated certificates.
+
 ### Manual installation
 
 Build the local operator utility and initialize the bundle:

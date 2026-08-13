@@ -44,9 +44,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Validate installer syntax
+      - name: Validate server script syntax
         run: |
           bash -n scripts/install-server.sh
+          bash -n scripts/uninstall-server.sh
           sh -n deploy/certbot/deploy-hook.sh
       - name: Validate Compose configuration
         env:
