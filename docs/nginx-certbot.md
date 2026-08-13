@@ -47,6 +47,12 @@ process and is not written to disk or placed in a command argument. Before
 changing DNS, the installer shows the selected zone, detected public addresses,
 and complete record plan for confirmation.
 
+The prompt links directly to the
+[Cloudflare API Tokens dashboard](https://dash.cloudflare.com/profile/api-tokens).
+Choose **Create Custom Token**, add `Zone → Zone → Read` and
+`Zone → DNS → Edit`, and restrict **Zone Resources** to the selected zone. A
+Global API Key is neither required nor recommended.
+
 It manages the mail hostname's unproxied A/AAAA records, the zone MX record, and
 the `autoconfig` and `autodiscover` CNAMEs. Existing SPF and DMARC policies are
 preserved; conservative defaults are created only when no corresponding policy

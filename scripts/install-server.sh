@@ -411,7 +411,22 @@ configure_cloudflare_dns() {
     CF_API_TOKEN="${CLOUDFLARE_API_TOKEN:-}"
     unset CLOUDFLARE_API_TOKEN || true
     if [[ -z "$CF_API_TOKEN" ]] && [[ -t 0 ]]; then
-        read -r -s -p "Cloudflare API token (Zone:Read and DNS:Edit): " CF_API_TOKEN
+        cat <<EOF
+
+Create a scoped Cloudflare API token here:
+  https://dash.cloudflare.com/profile/api-tokens
+
+Select "Create Custom Token" and configure:
+  Permissions:
+    Zone | Zone | Read
+    Zone | DNS  | Edit
+  Zone Resources:
+    Include | Specific zone | $DNS_ZONE
+
+Do not use the Global API Key. Paste the newly created token below; input is
+hidden and the token is used only for this installation process.
+EOF
+        read -r -s -p "Cloudflare API token (hidden): " CF_API_TOKEN
         printf '\n'
     fi
     [[ -n "$CF_API_TOKEN" ]] || \

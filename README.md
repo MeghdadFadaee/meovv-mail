@@ -65,6 +65,13 @@ Cloudflare DNS after asking for a scoped API token through a hidden prompt. It
 previews the records before making changes and never stores the token. The token
 needs `Zone:Read` and `DNS:Edit` for the selected zone.
 
+Create the token from the
+[Cloudflare API Tokens dashboard](https://dash.cloudflare.com/profile/api-tokens),
+choose **Create Custom Token**, grant `Zone → Zone → Read` and
+`Zone → DNS → Edit`, and restrict its resources to the specific mail zone. Do
+not use the Global API Key. The installer prints these instructions before its
+hidden token prompt.
+
 Automatic DNS setup creates or updates the mail-host A/AAAA record, the primary
 MX record, and autoconfiguration CNAMEs. It adds monitoring-mode DMARC and a
 soft-fail SPF default only when those policies do not already exist. It cannot
