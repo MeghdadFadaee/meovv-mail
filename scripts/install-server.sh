@@ -17,8 +17,14 @@ MAIL_HOSTNAME=""
 ADMIN_EMAIL=""
 BUNDLE_DIR="$REPOSITORY_DIR"
 ASSUME_YES=false
+CONFIGURE_DNS=false
+DNS_ZONE=""
+PUBLIC_IPV4=""
+PUBLIC_IPV6=""
 TEMP_CONTAINER=""
 TEMP_FILES=()
+CF_API_TOKEN=""
+CF_ZONE_ID=""
 
 log() {
     printf '\n\033[1;35m==>\033[0m %s\n' "$*"
@@ -52,6 +58,8 @@ Usage:
   sudo ./scripts/install-server.sh install \
     --hostname mail.example.com \
     --email admin@example.com \
+    [--configure-dns] [--dns-zone example.com] \
+    [--public-ipv4 203.0.113.10] [--public-ipv6 2001:db8::10] \
     [--bundle-dir /opt/meovv-mail] [--yes]
 
   sudo ./scripts/install-server.sh finalize \
@@ -67,7 +75,11 @@ Commands:
             administrator, register TLS with Stalwart and remove recovery access.
   status    Show service, certificate, and local endpoint status without changes.
 
-This script does not modify DNS, PTR records, provider firewalls, SSH, or UFW.
+This script does not modify PTR records, provider firewalls, SSH, or UFW.
+Interactive installs can optionally configure supported Cloudflare DNS records;
+DNS is unchanged when that option is declined.
+For unattended DNS setup, use --configure-dns and provide the token through
+CLOUDFLARE_API_TOKEN; the token is never written to disk.
 EOF
 }
 
@@ -93,6 +105,25 @@ parse_arguments() {
                 BUNDLE_DIR="$2"
                 shift 2
                 ;;
+            --configure-dns)
+                CONFIGURE_DNS=true
+                shift
+                ;;
+            --dns-zone)
+                [[ $# -ge 2 ]] || die "--dns-zone requires a value"
+                DNS_ZONE="$2"
+                shift 2
+                ;;
+            --public-ipv4)
+                [[ $# -ge 2 ]] || die "--public-ipv4 requires a value"
+                PUBLIC_IPV4="$2"
+                shift 2
+                ;;
+            --public-ipv6)
+                [[ $# -ge 2 ]] || die "--public-ipv6 requires a value"
+                PUBLIC_IPV6="$2"
+                shift 2
+                ;;
             --yes|-y)
                 ASSUME_YES=true
                 shift
@@ -114,6 +145,10 @@ parse_arguments() {
 
     [[ "$BUNDLE_DIR" = /* ]] || die "--bundle-dir must be an absolute path"
     [[ "$BUNDLE_DIR" != *$'\n'* ]] || die "--bundle-dir contains a newline"
+    if [[ "$COMMAND" != "install" ]] && \
+       { $CONFIGURE_DNS || [[ -n "$DNS_ZONE$PUBLIC_IPV4$PUBLIC_IPV6" ]]; }; then
+        die "DNS options are valid only with the install command"
+    fi
 }
 
 require_root() {
@@ -151,7 +186,9 @@ This will install or update Docker Engine, Nginx, and Certbot, write:
 and start MEOVV Mail from:
   $BUNDLE_DIR
 
-It will not alter unrelated Nginx files, DNS, PTR, or firewall rules.
+It will not alter unrelated Nginx files, PTR, or firewall rules. You will be
+offered optional Cloudflare DNS configuration separately; declining leaves DNS
+unchanged.
 EOF
     read -r -p "Continue? [y/N] " answer
     [[ "$answer" =~ ^[Yy]$ ]] || die "installation cancelled"
@@ -195,9 +232,240 @@ install_base_packages() {
         dnsutils \
         gnupg \
         iproute2 \
+        jq \
         nginx \
         openssl \
         python3-certbot-nginx
+}
+
+is_ipv4() {
+    local address="$1" octet
+    local -a octets=()
+    [[ "$address" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || return 1
+    local old_ifs="$IFS"
+    IFS=.
+    read -r -a octets <<< "$address"
+    IFS="$old_ifs"
+    for octet in "${octets[@]}"; do
+        (( 10#$octet <= 255 )) || return 1
+    done
+}
+
+is_ipv6() {
+    [[ "$1" == *:* && "$1" =~ ^[0-9A-Fa-f:]+$ ]]
+}
+
+validate_dns_inputs() {
+    [[ "$DNS_ZONE" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$ ]] || \
+        die "invalid Cloudflare zone name: $DNS_ZONE"
+    DNS_ZONE="${DNS_ZONE,,}"
+    [[ "$MAIL_HOSTNAME" == "$DNS_ZONE" || "$MAIL_HOSTNAME" == *."$DNS_ZONE" ]] || \
+        die "$MAIL_HOSTNAME is not inside the Cloudflare zone $DNS_ZONE"
+    [[ -z "$PUBLIC_IPV4" ]] || is_ipv4 "$PUBLIC_IPV4" || die "invalid public IPv4 address: $PUBLIC_IPV4"
+    [[ -z "$PUBLIC_IPV6" ]] || is_ipv6 "$PUBLIC_IPV6" || die "invalid public IPv6 address: $PUBLIC_IPV6"
+    [[ -n "$PUBLIC_IPV4$PUBLIC_IPV6" ]] || die "automatic DNS setup requires a public IPv4 and/or IPv6 address"
+}
+
+discover_public_address() {
+    local family="$1"
+    curl "-$family" --fail --silent --show-error --max-time 8 \
+        https://1.1.1.1/cdn-cgi/trace 2>/dev/null | sed -n 's/^ip=//p' | head -n 1
+}
+
+cloudflare_api() {
+    local method="$1" path="$2" data="${3:-}"
+    local arguments=(
+        --fail-with-body
+        --silent
+        --show-error
+        --request "$method"
+        "https://api.cloudflare.com/client/v4$path"
+    )
+    if [[ -n "$data" ]]; then
+        arguments+=(--data "$data")
+    fi
+
+    # Read the authorization header from stdin so the token does not appear in
+    # the curl process arguments or get written to a temporary file.
+    printf 'header = "Authorization: Bearer %s"\nheader = "Content-Type: application/json"\n' \
+        "$CF_API_TOKEN" | curl --config - "${arguments[@]}"
+}
+
+require_cloudflare_success() {
+    local response="$1" action="$2"
+    if ! jq -e '.success == true' >/dev/null 2>&1 <<< "$response"; then
+        local detail
+        detail="$(jq -r '[.errors[]? | (.code|tostring) + ": " + .message] | join("; ")' <<< "$response" 2>/dev/null || true)"
+        die "Cloudflare could not $action${detail:+: $detail}"
+    fi
+}
+
+cloudflare_records() {
+    local type="$1" name="$2" response
+    response="$(cloudflare_api GET "/zones/$CF_ZONE_ID/dns_records?type=$type&name=$name&per_page=100")" || \
+        die "Cloudflare DNS lookup failed for $name"
+    require_cloudflare_success "$response" "read $type records for $name"
+    printf '%s' "$response"
+}
+
+write_cloudflare_record() {
+    local action="$1" record_id="$2" body="$3" response
+    if [[ "$action" == "create" ]]; then
+        response="$(cloudflare_api POST "/zones/$CF_ZONE_ID/dns_records" "$body")" || \
+            die "Cloudflare DNS record creation failed"
+    else
+        response="$(cloudflare_api PUT "/zones/$CF_ZONE_ID/dns_records/$record_id" "$body")" || \
+            die "Cloudflare DNS record update failed"
+    fi
+    require_cloudflare_success "$response" "$action a DNS record"
+}
+
+ensure_cloudflare_record() {
+    local type="$1" name="$2" content="$3" priority="${4:-}" response count exact_id record_id body
+    response="$(cloudflare_records "$type" "$name")"
+    count="$(jq '.result | length' <<< "$response")"
+    if [[ "$type" == "MX" ]]; then
+        exact_id="$(jq -r --arg content "$content" --argjson priority "$priority" \
+            '.result[] | select(.content == $content and .priority == $priority) | .id' <<< "$response" | head -n 1)"
+        body="$(jq -cn --arg type "$type" --arg name "$name" --arg content "$content" \
+            --argjson priority "$priority" '{type:$type,name:$name,content:$content,priority:$priority,ttl:1}')"
+    else
+        exact_id="$(jq -r --arg content "$content" \
+            '.result[] | select(.content == $content and .proxied == false) | .id' <<< "$response" | head -n 1)"
+        body="$(jq -cn --arg type "$type" --arg name "$name" --arg content "$content" \
+            '{type:$type,name:$name,content:$content,ttl:1,proxied:false}')"
+    fi
+
+    if (( count > 1 )); then
+        die "multiple Cloudflare $type records exist for $name; review them manually instead of replacing them"
+    fi
+    if [[ -n "$exact_id" ]]; then
+        log "Cloudflare $type record is already correct: $name"
+        return
+    fi
+    if (( count == 1 )); then
+        record_id="$(jq -r '.result[0].id' <<< "$response")"
+        write_cloudflare_record update "$record_id" "$body"
+        log "Updated Cloudflare $type record: $name"
+    else
+        write_cloudflare_record create "" "$body"
+        log "Created Cloudflare $type record: $name"
+    fi
+}
+
+ensure_cloudflare_txt_default() {
+    local name="$1" prefix="$2" content="$3" response exact existing body
+    response="$(cloudflare_records TXT "$name")"
+    exact="$(jq -r --arg content "$content" '.result[] | select(.content == $content) | .id' \
+        <<< "$response" | head -n 1)"
+    if [[ -n "$exact" ]]; then
+        log "Cloudflare TXT record is already correct: $name"
+        return
+    fi
+    existing="$(jq -r --arg prefix "$prefix" '.result[] | select(.content | startswith($prefix)) | .content' \
+        <<< "$response" | head -n 1)"
+    if [[ -n "$existing" ]]; then
+        warn "Keeping the existing TXT policy for $name: $existing"
+        return
+    fi
+    body="$(jq -cn --arg name "$name" --arg content "$content" \
+        '{type:"TXT",name:$name,content:$content,ttl:1}')"
+    write_cloudflare_record create "" "$body"
+    log "Created conservative Cloudflare TXT policy: $name"
+}
+
+wait_for_cloudflare_dns() {
+    log "Waiting for the mail hostname to appear in public DNS"
+    local attempt answer
+    for attempt in {1..20}; do
+        if [[ -n "$PUBLIC_IPV4" ]]; then
+            answer="$(dig +short A "$MAIL_HOSTNAME" @1.1.1.1 | grep -Fx "$PUBLIC_IPV4" || true)"
+        else
+            answer="$(dig +short AAAA "$MAIL_HOSTNAME" @1.1.1.1 | grep -Fxi "$PUBLIC_IPV6" || true)"
+        fi
+        [[ -n "$answer" ]] && return
+        sleep 3
+    done
+    die "Cloudflare accepted the DNS records, but $MAIL_HOSTNAME is not publicly visible yet; wait briefly and rerun the installer"
+}
+
+configure_cloudflare_dns() {
+    DNS_ZONE="${DNS_ZONE:-${ADMIN_EMAIL##*@}}"
+    local detected_ipv4 detected_ipv6 answer response zone_count
+    detected_ipv4="${PUBLIC_IPV4:-$(discover_public_address 4 || true)}"
+    detected_ipv6="$(discover_public_address 6 || true)"
+
+    if [[ -t 0 ]] && ! $ASSUME_YES; then
+        read -r -p "Cloudflare zone [$DNS_ZONE]: " answer
+        DNS_ZONE="${answer:-$DNS_ZONE}"
+        read -r -p "Public IPv4 [$detected_ipv4]: " answer
+        PUBLIC_IPV4="${answer:-$detected_ipv4}"
+        if [[ -z "$PUBLIC_IPV6" ]]; then
+            read -r -p "Public IPv6 (optional; detected $detected_ipv6, blank to skip): " PUBLIC_IPV6
+        fi
+    else
+        PUBLIC_IPV4="$detected_ipv4"
+    fi
+    validate_dns_inputs
+
+    CF_API_TOKEN="${CLOUDFLARE_API_TOKEN:-}"
+    unset CLOUDFLARE_API_TOKEN || true
+    if [[ -z "$CF_API_TOKEN" ]] && [[ -t 0 ]]; then
+        read -r -s -p "Cloudflare API token (Zone:Read and DNS:Edit): " CF_API_TOKEN
+        printf '\n'
+    fi
+    [[ -n "$CF_API_TOKEN" ]] || \
+        die "Cloudflare DNS setup requires a token through the hidden prompt or CLOUDFLARE_API_TOKEN"
+    [[ "$CF_API_TOKEN" != *$'\n'* && "$CF_API_TOKEN" != *'"'* && "$CF_API_TOKEN" != *'\\'* ]] || \
+        die "the Cloudflare API token contains unsupported characters"
+
+    response="$(cloudflare_api GET /user/tokens/verify)" || die "Cloudflare token verification request failed"
+    require_cloudflare_success "$response" "verify the API token"
+    response="$(cloudflare_api GET "/zones?name=$DNS_ZONE&status=active&per_page=2")" || \
+        die "Cloudflare zone lookup failed"
+    require_cloudflare_success "$response" "look up zone $DNS_ZONE"
+    zone_count="$(jq '.result | length' <<< "$response")"
+    [[ "$zone_count" -eq 1 ]] || die "expected one active Cloudflare zone named $DNS_ZONE; found $zone_count"
+    CF_ZONE_ID="$(jq -r '.result[0].id' <<< "$response")"
+
+    cat <<EOF
+
+Cloudflare DNS changes for $DNS_ZONE:
+  A     $MAIL_HOSTNAME -> ${PUBLIC_IPV4:-skip}
+  AAAA  $MAIL_HOSTNAME -> ${PUBLIC_IPV6:-skip}
+  MX    $DNS_ZONE -> $MAIL_HOSTNAME (priority 10)
+  CNAME autoconfig.$DNS_ZONE -> $MAIL_HOSTNAME
+  CNAME autodiscover.$DNS_ZONE -> $MAIL_HOSTNAME
+  TXT   SPF and DMARC conservative defaults, only when no policy exists
+
+DKIM is generated after domain setup. PTR must be configured at the server/IP
+provider. Existing SPF or DMARC policies will never be overwritten.
+EOF
+    if [[ -t 0 ]] && ! $ASSUME_YES; then
+        read -r -p "Apply these DNS changes? [y/N] " answer
+        [[ "$answer" =~ ^[Yy]$ ]] || die "DNS configuration cancelled"
+    fi
+
+    [[ -z "$PUBLIC_IPV4" ]] || ensure_cloudflare_record A "$MAIL_HOSTNAME" "$PUBLIC_IPV4"
+    [[ -z "$PUBLIC_IPV6" ]] || ensure_cloudflare_record AAAA "$MAIL_HOSTNAME" "$PUBLIC_IPV6"
+    ensure_cloudflare_record MX "$DNS_ZONE" "$MAIL_HOSTNAME" 10
+    ensure_cloudflare_record CNAME "autoconfig.$DNS_ZONE" "$MAIL_HOSTNAME"
+    ensure_cloudflare_record CNAME "autodiscover.$DNS_ZONE" "$MAIL_HOSTNAME"
+    ensure_cloudflare_txt_default "$DNS_ZONE" "v=spf1 " "v=spf1 mx ~all"
+    ensure_cloudflare_txt_default "_dmarc.$DNS_ZONE" "v=DMARC1;" \
+        "v=DMARC1; p=none; rua=mailto:postmaster@$DNS_ZONE"
+    wait_for_cloudflare_dns
+    CF_API_TOKEN=""
+}
+
+configure_dns_if_requested() {
+    local answer
+    if ! $CONFIGURE_DNS && [[ -t 0 ]] && ! $ASSUME_YES; then
+        read -r -p "Configure the required DNS records with Cloudflare now? [y/N] " answer
+        [[ "$answer" =~ ^[Yy]$ ]] && CONFIGURE_DNS=true
+    fi
+    $CONFIGURE_DNS || return
+    configure_cloudflare_dns
 }
 
 package_is_installed() {
@@ -462,6 +730,7 @@ install_command() {
     install_docker
     build_and_install_mailctl
     initialize_bundle
+    configure_dns_if_requested
     install_challenge_site
     obtain_certificate
     copy_certificate_to_stalwart

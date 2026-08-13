@@ -27,9 +27,10 @@ enables the final route split, copies the certificate into MEOVV's protected
 secrets directory, installs the renewal hook, and starts both containers.
 
 It deliberately leaves DNS, PTR records, provider firewall rules, SSH, and UFW
-to the operator. It also stops when it finds a conflicting unmanaged Nginx site
-or container package rather than replacing an existing setup. After the browser
-wizard and permanent administrator verification, run:
+to the operator unless the optional Cloudflare DNS prompt is accepted. It also
+stops when it finds a conflicting unmanaged Nginx site or container package
+rather than replacing an existing setup. After the browser wizard and permanent
+administrator verification, run:
 
 ```bash
 sudo ./scripts/install-server.sh finalize
@@ -37,6 +38,26 @@ sudo ./scripts/install-server.sh finalize
 
 The rest of this document describes the same integration for manual installs
 and explains the files managed by the installer.
+
+### Optional Cloudflare DNS setup
+
+When accepted, the installer requests a Cloudflare API token with `Zone:Read`
+and `DNS:Edit` through a hidden prompt. The token is used only for the current
+process and is not written to disk or placed in a command argument. Before
+changing DNS, the installer shows the selected zone, detected public addresses,
+and complete record plan for confirmation.
+
+It manages the mail hostname's unproxied A/AAAA records, the zone MX record, and
+the `autoconfig` and `autodiscover` CNAMEs. Existing SPF and DMARC policies are
+preserved; conservative defaults are created only when no corresponding policy
+exists. Multiple existing records that would make an update ambiguous stop the
+installation for manual review.
+
+Cloudflare cannot set the server provider's PTR record. DKIM is intentionally
+deferred until the domain exists in Stalwart and its generated public key can be
+published. For non-interactive use, pass `--configure-dns` and provide
+`CLOUDFLARE_API_TOKEN` in the environment. Optional `--dns-zone`,
+`--public-ipv4`, and `--public-ipv6` flags override detected defaults.
 
 ## Nginx
 

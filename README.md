@@ -58,13 +58,38 @@ sudo ./scripts/install-server.sh install \
   --email admin@example.com
 ```
 
-The hostname's A/AAAA record must already point to the server and inbound port
-80 must be reachable so Let's Encrypt can issue the certificate. The installer
-does not change DNS, PTR, provider firewall rules, SSH, or UFW. It detects
+Without automatic DNS setup, the hostname's A/AAAA record must already point to
+the server. Inbound port 80 must always be reachable so Let's Encrypt can issue
+the certificate. During an interactive installation, the script can configure
+Cloudflare DNS after asking for a scoped API token through a hidden prompt. It
+previews the records before making changes and never stores the token. The token
+needs `Zone:Read` and `DNS:Edit` for the selected zone.
+
+Automatic DNS setup creates or updates the mail-host A/AAAA record, the primary
+MX record, and autoconfiguration CNAMEs. It adds monitoring-mode DMARC and a
+soft-fail SPF default only when those policies do not already exist. It cannot
+set provider-owned PTR records, and DKIM remains a post-setup action because
+Stalwart generates its value. Declining the prompt leaves DNS unchanged.
+
+The installer does not change provider firewall rules, SSH, or UFW. It detects
 unmanaged Nginx hostname conflicts and conflicting Docker packages instead of
 overwriting or removing them. If Docker is already installed without Compose
 v2, it adds the matching Compose package from the configured APT repositories.
 Use `--yes` only for a reviewed, non-interactive installation.
+
+For unattended Cloudflare setup, pass `--configure-dns` and provide the token
+through the environment rather than a command-line argument:
+
+```bash
+read -r -s -p 'Cloudflare API token: ' CLOUDFLARE_API_TOKEN; export CLOUDFLARE_API_TOKEN
+sudo --preserve-env=CLOUDFLARE_API_TOKEN ./scripts/install-server.sh install \
+  --hostname mail.example.com \
+  --email admin@example.com \
+  --configure-dns \
+  --dns-zone example.com \
+  --yes
+unset CLOUDFLARE_API_TOKEN
+```
 
 Visit the printed HTTPS URL and complete the browser wizard. After creating and
 testing a permanent administrator, finish the security setup:
