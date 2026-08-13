@@ -38,14 +38,14 @@ func TestJMAPSucceededRejectsFailedUpdate(t *testing.T) {
 }
 
 func TestConfigureTLSRejectsRemoteManagementURL(t *testing.T) {
-	err := configureTLS([]string{"--directory", t.TempDir(), "--url", "http://mail.example.com/api"})
+	err := configureTLS([]string{"--directory", t.TempDir(), "--url", "http://mail.example.com/jmap"})
 	if err == nil || !strings.Contains(err.Error(), "loopback") {
 		t.Fatalf("expected loopback URL rejection, got %v", err)
 	}
 }
 
 func TestConfigureTLSRejectsHTTPSManagementURL(t *testing.T) {
-	err := configureTLS([]string{"--directory", t.TempDir(), "--url", "https://127.0.0.1:8081/api"})
+	err := configureTLS([]string{"--directory", t.TempDir(), "--url", "https://127.0.0.1:8081/jmap"})
 	if err == nil || !strings.Contains(err.Error(), "loopback HTTP URL") {
 		t.Fatalf("expected plain loopback HTTP requirement, got %v", err)
 	}

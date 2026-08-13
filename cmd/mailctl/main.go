@@ -252,7 +252,7 @@ func createAPIKey(args []string) error {
 func configureTLS(args []string) error {
 	fs := flag.NewFlagSet("configure-tls", flag.ContinueOnError)
 	dir := fs.String("directory", ".", "Compose bundle directory")
-	endpoint := fs.String("url", "http://127.0.0.1:8081/api", "loopback Stalwart management endpoint")
+	endpoint := fs.String("url", "http://127.0.0.1:8081/jmap", "loopback Stalwart management JMAP endpoint")
 	certificatePath := fs.String("certificate-path", "/etc/stalwart/tls/fullchain.pem", "certificate path inside the Stalwart container")
 	privateKeyPath := fs.String("private-key-path", "/etc/stalwart/tls/privkey.pem", "private key path inside the Stalwart container")
 	if err := fs.Parse(args); err != nil {
@@ -260,8 +260,8 @@ func configureTLS(args []string) error {
 	}
 	root, _ := filepath.Abs(*dir)
 	managementURL, err := url.Parse(*endpoint)
-	if err != nil || managementURL.Scheme != "http" || managementURL.Path != "/api" || managementURL.User != nil || managementURL.RawQuery != "" || managementURL.Fragment != "" {
-		return errors.New("--url must be a loopback HTTP URL ending in /api")
+	if err != nil || managementURL.Scheme != "http" || managementURL.Path != "/jmap" || managementURL.User != nil || managementURL.RawQuery != "" || managementURL.Fragment != "" {
+		return errors.New("--url must be a loopback HTTP URL ending in /jmap")
 	}
 	managementHost := managementURL.Hostname()
 	managementIP := net.ParseIP(managementHost)

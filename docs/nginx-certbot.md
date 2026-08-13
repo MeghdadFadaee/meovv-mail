@@ -141,7 +141,7 @@ references, selects it as `defaultCertificateId`, records the object id in
 port was changed, pass a loopback URL explicitly:
 
 ```bash
-./mailctl configure-tls --url http://127.0.0.1:9081/api
+./mailctl configure-tls --url http://127.0.0.1:9081/jmap
 ```
 
 ## Renewal hook

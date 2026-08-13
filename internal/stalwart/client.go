@@ -35,11 +35,11 @@ func (c *Client) Bootstrap(ctx context.Context, bootstrapURL, recoveryAdmin, hos
 			"serverHostname": hostname, "defaultDomain": domain, "requestTlsCertificate": false, "generateDkimKeys": true,
 			"dataStore": map[string]any{"@type": "RocksDb", "path": "/var/lib/stalwart/"},
 			"blobStore": map[string]any{"@type": "Default"}, "searchStore": map[string]any{"@type": "Default"}, "inMemoryStore": map[string]any{"@type": "Default"},
-			"directory": map[string]any{"@type": "Internal"}, "tracer": map[string]any{"@type": "Console"}, "dnsServer": map[string]any{"@type": "Manual"},
+			"directory": map[string]any{"@type": "Internal"}, "tracer": map[string]any{"@type": "Stdout"}, "dnsServer": map[string]any{"@type": "Manual"},
 		}}}, "bootstrap"}},
 	}
 	raw, _ := json.Marshal(payload)
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(bootstrapURL, "/")+"/api", bytes.NewReader(raw))
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(bootstrapURL, "/")+"/jmap", bytes.NewReader(raw))
 	req.SetBasicAuth(parts[0], parts[1])
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.HTTP.Do(req)
@@ -114,11 +114,11 @@ func (c *Client) ProxyJMAP(ctx context.Context, token string, body []byte) (int,
 	return c.proxy(ctx, token, "/jmap", body)
 }
 
-// ProxyManagement keeps Stalwart's pre-1.0 management schema behind the MEOVV
-// adapter. The browser never receives an administrator token or direct access
-// to Stalwart's management endpoint.
+// ProxyManagement keeps Stalwart's pre-1.0 management JMAP schema behind the
+// MEOVV adapter. The browser never receives an administrator token or direct
+// access to Stalwart's management endpoint.
 func (c *Client) ProxyManagement(ctx context.Context, token string, body []byte) (int, http.Header, []byte, error) {
-	return c.proxy(ctx, token, "/api", body)
+	return c.proxy(ctx, token, "/jmap", body)
 }
 
 func (c *Client) JMAPSession(ctx context.Context, token string) (int, http.Header, []byte, error) {
