@@ -67,7 +67,10 @@ loopback request pinned to local Nginx from a normal public-hostname request and
 includes public A/AAAA answers and any redirect location. If `sites-enabled` is
 not loaded, the installer safely retries its managed site through
 `/etc/nginx/conf.d/meovv-mail.conf`; it does not edit `nginx.conf` or unrelated
-virtual hosts.
+virtual hosts. The public response is the issuance gate because it matches what
+the ACME server can reach. A differing loopback virtual-host response remains a
+visible warning but does not block issuance when the public response is `200`
+with exact challenge content.
 
 It manages the mail hostname's unproxied A/AAAA records, the zone MX record, and
 the `autoconfig` and `autodiscover` CNAMEs. Existing SPF and DMARC policies are

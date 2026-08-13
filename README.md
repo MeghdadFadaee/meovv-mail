@@ -81,7 +81,10 @@ no redirect. If another proxy, NAT rule, or virtual host intercepts the request,
 installation stops with a report covering the active Nginx site, public A/AAAA
 answers, local-origin result, public result, and redirect target. If this host's
 Nginx does not load `sites-enabled`, the installer automatically tries its
-managed `conf.d` fallback before reporting a configuration problem.
+managed `conf.d` fallback before reporting a configuration problem. The public
+result is authoritative: a different loopback virtual-host result is reported
+as a warning but does not block Certbot when the public challenge returns exact
+content.
 
 Automatic DNS setup creates or updates the mail-host A/AAAA record, the primary
 MX record, and autoconfiguration CNAMEs. It adds monitoring-mode DMARC and a

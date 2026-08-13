@@ -672,7 +672,7 @@ verify_http_challenge_route() {
     local challenge_directory challenge_name challenge_file challenge_url
     local local_body local_headers local_status="000" local_curl_ok local_content_ok
     local public_body public_headers public_status="000" public_curl_ok public_content_ok
-    local public_redirect public_ipv4 public_ipv6
+    local local_redirect public_redirect public_ipv4 public_ipv6
     challenge_directory="$CERTBOT_WEBROOT/.well-known/acme-challenge"
     challenge_name="meovv-preflight-$(openssl rand -hex 12)"
     challenge_file="$challenge_directory/$challenge_name"
@@ -702,6 +702,7 @@ verify_http_challenge_route() {
     fi
     local_content_ok=false
     cmp -s "$challenge_file" "$local_body" && local_content_ok=true
+    local_redirect="$(sed -n 's/^[Ll]ocation:[[:space:]]*//p' "$local_headers" | tr -d '\r' | tail -n 1)"
 
     public_ipv4="$(dig +short A "$MAIL_HOSTNAME" @1.1.1.1 | paste -sd ',' - || true)"
     public_ipv6="$(dig +short AAAA "$MAIL_HOSTNAME" @1.1.1.1 | paste -sd ',' - || true)"
@@ -729,13 +730,11 @@ HTTP-01 preflight report
   Public DNS A:      ${public_ipv4:-none}
   Public DNS AAAA:   ${public_ipv6:-none}
   Local origin:      status ${local_status:-000}, exact challenge: $local_content_ok
+  Local redirect:    ${local_redirect:-none}
   Public hostname:   status ${public_status:-000}, exact challenge: $public_content_ok
   Public redirect:   ${public_redirect:-none}
 EOF
 
-    if ! $local_curl_ok || [[ "$local_status" != "200" ]] || ! $local_content_ok; then
-        die "local Nginx does not serve the managed HTTP-01 challenge; inspect the reported active site and port 80 listener"
-    fi
     if [[ -z "$public_ipv4$public_ipv6" ]]; then
         die "$MAIL_HOSTNAME has no public A or AAAA response from resolver 1.1.1.1"
     fi
@@ -744,6 +743,9 @@ EOF
             die "public HTTP for $MAIL_HOSTNAME is intercepted and redirects to $public_redirect; correct the upstream proxy, NAT, or provider routing before running Certbot"
         fi
         die "public port 80 does not return the local MEOVV challenge; correct DNS, NAT, firewall, or upstream proxy routing before running Certbot"
+    fi
+    if ! $local_curl_ok || [[ "$local_status" != "200" ]] || ! $local_content_ok; then
+        warn "loopback HTTP differs from the public route${local_redirect:+ and redirects to $local_redirect}; the authoritative public challenge passed, so installation can continue"
     fi
 
     rm -f -- "$challenge_file" "$local_body" "$local_headers" "$public_body" "$public_headers"
