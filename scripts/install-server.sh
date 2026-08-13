@@ -10,6 +10,7 @@ readonly CERTBOT_WEBROOT="/var/www/certbot"
 readonly CERTBOT_HOOK="/etc/letsencrypt/renewal-hooks/deploy/meovv-mail"
 readonly MAILCTL_BIN="/usr/local/bin/mailctl"
 readonly MANAGED_MARKER="Managed by MEOVV Mail installer"
+readonly MEOVV_RELEASE="0.1.0"
 
 COMMAND=""
 MAIL_HOSTNAME=""
@@ -366,13 +367,14 @@ compose() {
 
 build_and_install_mailctl() {
     log "Building the pinned MEOVV application image"
-    MAIL_HOSTNAME="$MAIL_HOSTNAME" MEOVV_VERSION=0.1.0 compose build meovv
+    MAIL_HOSTNAME="$MAIL_HOSTNAME" MEOVV_VERSION="$MEOVV_RELEASE" compose build meovv
 
-    local image_id temporary_binary
-    image_id="$(MAIL_HOSTNAME="$MAIL_HOSTNAME" MEOVV_VERSION=0.1.0 compose images -q meovv)"
-    [[ -n "$image_id" ]] || die "the MEOVV image was not created"
+    local image_ref temporary_binary
+    image_ref="meovv-mail:$MEOVV_RELEASE"
+    docker image inspect "$image_ref" >/dev/null 2>&1 || \
+        die "the expected MEOVV image $image_ref was not created"
 
-    TEMP_CONTAINER="$(docker create "$image_id")"
+    TEMP_CONTAINER="$(docker create "$image_ref")"
     temporary_binary="$(mktemp /tmp/meovv-mailctl.XXXXXX)"
     TEMP_FILES+=("$temporary_binary")
     docker cp "$TEMP_CONTAINER:/usr/local/bin/mailctl" "$temporary_binary"
