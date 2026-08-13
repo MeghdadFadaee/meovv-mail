@@ -6,6 +6,7 @@ readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly REPOSITORY_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
 readonly NGINX_AVAILABLE="/etc/nginx/sites-available/meovv-mail"
 readonly NGINX_ENABLED="/etc/nginx/sites-enabled/meovv-mail"
+readonly NGINX_CONFD="/etc/nginx/conf.d/meovv-mail.conf"
 readonly CERTBOT_WEBROOT="/var/www/certbot"
 readonly CERTBOT_HOOK="/etc/letsencrypt/renewal-hooks/deploy/meovv-mail"
 readonly MAILCTL_BIN="/usr/local/bin/mailctl"
@@ -25,6 +26,7 @@ TEMP_CONTAINER=""
 TEMP_FILES=()
 CF_API_TOKEN=""
 CF_ZONE_ID=""
+NGINX_ACTIVE_LINK="$NGINX_ENABLED"
 
 log() {
     printf '\n\033[1;35m==>\033[0m %s\n' "$*"
@@ -576,20 +578,66 @@ assert_hostname_is_available() {
     if [[ -e "$NGINX_AVAILABLE" ]] && ! grep -Fq "$MANAGED_MARKER" "$NGINX_AVAILABLE"; then
         die "$NGINX_AVAILABLE exists but is not managed by this installer"
     fi
+    if [[ -e "$NGINX_CONFD" || -L "$NGINX_CONFD" ]]; then
+        if [[ "$(readlink -f "$NGINX_CONFD" 2>/dev/null || true)" != "$(readlink -f "$NGINX_AVAILABLE" 2>/dev/null || true)" ]] && \
+           ! grep -Fq "$MANAGED_MARKER" "$NGINX_CONFD" 2>/dev/null; then
+            die "$NGINX_CONFD exists but is not managed by this installer"
+        fi
+        NGINX_ACTIVE_LINK="$NGINX_CONFD"
+    fi
+}
+
+ensure_managed_nginx_site_loaded() {
+    local nginx_configuration
+    nginx_configuration="$(nginx -T 2>&1)" || die "could not inspect the active Nginx configuration"
+    if grep -Fq "# $MANAGED_MARKER" <<< "$nginx_configuration"; then
+        return
+    fi
+
+    warn "$NGINX_ENABLED is not loaded by nginx.conf; trying the standard conf.d location"
+    if [[ -e "$NGINX_CONFD" || -L "$NGINX_CONFD" ]]; then
+        die "$NGINX_CONFD is unavailable for the managed Nginx fallback"
+    fi
+    install -d -m 0755 /etc/nginx/conf.d
+    ln -s "$NGINX_AVAILABLE" "$NGINX_CONFD"
+    if [[ -L "$NGINX_ENABLED" ]] && \
+       [[ "$(readlink -f "$NGINX_ENABLED")" == "$(readlink -f "$NGINX_AVAILABLE")" ]]; then
+        rm -f -- "$NGINX_ENABLED"
+    fi
+    NGINX_ACTIVE_LINK="$NGINX_CONFD"
+
+    if ! nginx -t || ! systemctl reload nginx; then
+        rm -f -- "$NGINX_CONFD"
+        ln -sfn "$NGINX_AVAILABLE" "$NGINX_ENABLED"
+        die "Nginx could not load the managed site from sites-enabled or conf.d"
+    fi
+    nginx_configuration="$(nginx -T 2>&1)" || die "could not re-inspect the active Nginx configuration"
+    if ! grep -Fq "# $MANAGED_MARKER" <<< "$nginx_configuration"; then
+        rm -f -- "$NGINX_CONFD"
+        ln -sfn "$NGINX_AVAILABLE" "$NGINX_ENABLED"
+        NGINX_ACTIVE_LINK="$NGINX_ENABLED"
+        die "nginx.conf loads neither /etc/nginx/sites-enabled/* nor /etc/nginx/conf.d/*.conf"
+    fi
+    log "Loaded the managed Nginx site through $NGINX_CONFD"
 }
 
 install_challenge_site() {
     install -d -m 0755 "$CERTBOT_WEBROOT"
     install -d -m 0755 /etc/nginx/sites-available /etc/nginx/sites-enabled
+    if [[ -L "$NGINX_CONFD" ]] && \
+       [[ "$(readlink -f "$NGINX_CONFD")" == "$(readlink -f "$NGINX_AVAILABLE" 2>/dev/null || true)" ]]; then
+        NGINX_ACTIVE_LINK="$NGINX_CONFD"
+    fi
 
     if [[ -r "/etc/letsencrypt/live/$MAIL_HOSTNAME/fullchain.pem" ]] && \
        [[ -r "/etc/letsencrypt/live/$MAIL_HOSTNAME/privkey.pem" ]] && \
        [[ -f "$NGINX_AVAILABLE" ]] && grep -Fq "listen 443 ssl" "$NGINX_AVAILABLE"; then
         log "Keeping the existing managed HTTPS site during certificate renewal"
-        ln -sfn "$NGINX_AVAILABLE" "$NGINX_ENABLED"
+        ln -sfn "$NGINX_AVAILABLE" "$NGINX_ACTIVE_LINK"
         nginx -t
         systemctl enable --now nginx
         systemctl reload nginx
+        ensure_managed_nginx_site_loaded
         return
     fi
 
@@ -611,10 +659,95 @@ server {
     }
 }
 EOF
-    ln -sfn "$NGINX_AVAILABLE" "$NGINX_ENABLED"
+    ln -sfn "$NGINX_AVAILABLE" "$NGINX_ACTIVE_LINK"
     nginx -t
     systemctl enable --now nginx
     systemctl reload nginx
+    ensure_managed_nginx_site_loaded
+}
+
+verify_http_challenge_route() {
+    log "Running the complete pre-Certbot HTTP-01 check"
+
+    local challenge_directory challenge_name challenge_file challenge_url
+    local local_body local_headers local_status="000" local_curl_ok local_content_ok
+    local public_body public_headers public_status="000" public_curl_ok public_content_ok
+    local public_redirect public_ipv4 public_ipv6
+    challenge_directory="$CERTBOT_WEBROOT/.well-known/acme-challenge"
+    challenge_name="meovv-preflight-$(openssl rand -hex 12)"
+    challenge_file="$challenge_directory/$challenge_name"
+    local_body="$(mktemp /tmp/meovv-http-local-body.XXXXXX)"
+    local_headers="$(mktemp /tmp/meovv-http-local-headers.XXXXXX)"
+    public_body="$(mktemp /tmp/meovv-http-public-body.XXXXXX)"
+    public_headers="$(mktemp /tmp/meovv-http-public-headers.XXXXXX)"
+    TEMP_FILES+=("$challenge_file" "$local_body" "$local_headers" "$public_body" "$public_headers")
+    install -d -m 0755 "$challenge_directory"
+    printf '%s' "$challenge_name" > "$challenge_file"
+    chmod 0644 "$challenge_file"
+    challenge_url="http://$MAIL_HOSTNAME/.well-known/acme-challenge/$challenge_name"
+
+    local_curl_ok=true
+    if ! local_status="$(curl \
+        --silent \
+        --show-error \
+        --max-time 8 \
+        --max-redirs 0 \
+        --noproxy '*' \
+        --resolve "$MAIL_HOSTNAME:80:127.0.0.1" \
+        --dump-header "$local_headers" \
+        --output "$local_body" \
+        --write-out '%{http_code}' \
+        "$challenge_url")"; then
+        local_curl_ok=false
+    fi
+    local_content_ok=false
+    cmp -s "$challenge_file" "$local_body" && local_content_ok=true
+
+    public_ipv4="$(dig +short A "$MAIL_HOSTNAME" @1.1.1.1 | paste -sd ',' - || true)"
+    public_ipv6="$(dig +short AAAA "$MAIL_HOSTNAME" @1.1.1.1 | paste -sd ',' - || true)"
+    public_curl_ok=true
+    if ! public_status="$(curl \
+        --silent \
+        --show-error \
+        --max-time 15 \
+        --max-redirs 0 \
+        --noproxy '*' \
+        --dump-header "$public_headers" \
+        --output "$public_body" \
+        --write-out '%{http_code}' \
+        "$challenge_url")"; then
+        public_curl_ok=false
+    fi
+    public_content_ok=false
+    cmp -s "$challenge_file" "$public_body" && public_content_ok=true
+    public_redirect="$(sed -n 's/^[Ll]ocation:[[:space:]]*//p' "$public_headers" | tr -d '\r' | tail -n 1)"
+
+    cat <<EOF
+
+HTTP-01 preflight report
+  Active Nginx site: $NGINX_ACTIVE_LINK
+  Public DNS A:      ${public_ipv4:-none}
+  Public DNS AAAA:   ${public_ipv6:-none}
+  Local origin:      status ${local_status:-000}, exact challenge: $local_content_ok
+  Public hostname:   status ${public_status:-000}, exact challenge: $public_content_ok
+  Public redirect:   ${public_redirect:-none}
+EOF
+
+    if ! $local_curl_ok || [[ "$local_status" != "200" ]] || ! $local_content_ok; then
+        die "local Nginx does not serve the managed HTTP-01 challenge; inspect the reported active site and port 80 listener"
+    fi
+    if [[ -z "$public_ipv4$public_ipv6" ]]; then
+        die "$MAIL_HOSTNAME has no public A or AAAA response from resolver 1.1.1.1"
+    fi
+    if ! $public_curl_ok || [[ "$public_status" != "200" ]] || ! $public_content_ok; then
+        if [[ -n "$public_redirect" ]]; then
+            die "public HTTP for $MAIL_HOSTNAME is intercepted and redirects to $public_redirect; correct the upstream proxy, NAT, or provider routing before running Certbot"
+        fi
+        die "public port 80 does not return the local MEOVV challenge; correct DNS, NAT, firewall, or upstream proxy routing before running Certbot"
+    fi
+
+    rm -f -- "$challenge_file" "$local_body" "$local_headers" "$public_body" "$public_headers"
+    log "All HTTP-01 checks passed; Certbot may start"
 }
 
 obtain_certificate() {
@@ -639,7 +772,7 @@ install_final_nginx_site() {
     sed "s/__MAIL_HOSTNAME__/$MAIL_HOSTNAME/g" \
         "$BUNDLE_DIR/deploy/nginx/meovv-mail.conf.example" \
         > "$NGINX_AVAILABLE"
-    ln -sfn "$NGINX_AVAILABLE" "$NGINX_ENABLED"
+    ln -sfn "$NGINX_AVAILABLE" "$NGINX_ACTIVE_LINK"
     nginx -t
     systemctl reload nginx
 }
@@ -747,6 +880,7 @@ install_command() {
     initialize_bundle
     configure_dns_if_requested
     install_challenge_site
+    verify_http_challenge_route
     obtain_certificate
     copy_certificate_to_stalwart
     install_certbot_hook

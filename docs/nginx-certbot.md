@@ -42,16 +42,32 @@ and explains the files managed by the installer.
 ### Optional Cloudflare DNS setup
 
 When accepted, the installer requests a Cloudflare API token with `Zone:Read`
-and `DNS:Edit` through a hidden prompt. The token is used only for the current
-process and is not written to disk or placed in a command argument. Before
-changing DNS, the installer shows the selected zone, detected public addresses,
-and complete record plan for confirmation.
+and `DNS:Edit` through a hidden prompt. Before changing DNS, the installer shows
+the selected zone, detected public addresses, and complete record plan for
+confirmation.
 
 The prompt links directly to the
 [Cloudflare API Tokens dashboard](https://dash.cloudflare.com/profile/api-tokens).
 Choose **Create Custom Token**, add `Zone → Zone → Read` and
 `Zone → DNS → Edit`, and restrict **Zone Resources** to the selected zone. A
 Global API Key is neither required nor recommended.
+
+The token is used only for the confirmed DNS changes and is then discarded.
+Certificate issuance and renewal deliberately use Certbot HTTP-01, proving that
+the public hostname and port 80 reach this server without retaining Cloudflare
+credentials.
+
+Immediately before Certbot, the installer creates a random file under
+`/var/www/certbot/.well-known/acme-challenge/` and requests it through the public
+mail hostname without following redirects. It proceeds only when the response
+is `200` with exact content. This detects unloaded Nginx site configuration,
+incorrect public IP/NAT routing, canonical-host redirects, and intercepted port
+80 traffic before consuming an ACME validation attempt. The report separates a
+loopback request pinned to local Nginx from a normal public-hostname request and
+includes public A/AAAA answers and any redirect location. If `sites-enabled` is
+not loaded, the installer safely retries its managed site through
+`/etc/nginx/conf.d/meovv-mail.conf`; it does not edit `nginx.conf` or unrelated
+virtual hosts.
 
 It manages the mail hostname's unproxied A/AAAA records, the zone MX record, and
 the `autoconfig` and `autodiscover` CNAMEs. Existing SPF and DMARC policies are

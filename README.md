@@ -62,8 +62,8 @@ Without automatic DNS setup, the hostname's A/AAAA record must already point to
 the server. Inbound port 80 must always be reachable so Let's Encrypt can issue
 the certificate. During an interactive installation, the script can configure
 Cloudflare DNS after asking for a scoped API token through a hidden prompt. It
-previews the records before making changes and never stores the token. The token
-needs `Zone:Read` and `DNS:Edit` for the selected zone.
+previews the records before making changes. The token needs `Zone:Read` and
+`DNS:Edit` for the selected zone.
 
 Create the token from the
 [Cloudflare API Tokens dashboard](https://dash.cloudflare.com/profile/api-tokens),
@@ -71,6 +71,17 @@ choose **Create Custom Token**, grant `Zone → Zone → Read` and
 `Zone → DNS → Edit`, and restrict its resources to the specific mail zone. Do
 not use the Global API Key. The installer prints these instructions before its
 hidden token prompt.
+
+The token is used only for DNS configuration and is never stored. Certificate
+issuance and renewal deliberately use HTTP-01 so installation proves the public
+hostname reaches this server and renewals do not depend on Cloudflare access.
+Before invoking Certbot, the installer publishes a random challenge probe and
+requires the public HTTP URL to return its exact content with status `200` and
+no redirect. If another proxy, NAT rule, or virtual host intercepts the request,
+installation stops with a report covering the active Nginx site, public A/AAAA
+answers, local-origin result, public result, and redirect target. If this host's
+Nginx does not load `sites-enabled`, the installer automatically tries its
+managed `conf.d` fallback before reporting a configuration problem.
 
 Automatic DNS setup creates or updates the mail-host A/AAAA record, the primary
 MX record, and autoconfiguration CNAMEs. It adds monitoring-mode DMARC and a
