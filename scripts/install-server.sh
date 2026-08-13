@@ -912,8 +912,15 @@ EOF
 finalize_command() {
     require_root
     require_bundle
-    [[ -x "$MAILCTL_BIN" ]] || die "$MAILCTL_BIN is missing; run install first"
     [[ -f "$BUNDLE_DIR/.env" ]] || die "$BUNDLE_DIR is not initialized"
+
+    # mailctl is installed on the host, outside the Compose lifecycle. Refresh
+    # it from this checkout before finalization so a container-only application
+    # update cannot leave an older management client calling stale Stalwart
+    # endpoints.
+    MAIL_HOSTNAME="$(sed -n 's/^MAIL_HOSTNAME=//p' "$BUNDLE_DIR/.env" | tail -n 1)"
+    [[ -n "$MAIL_HOSTNAME" ]] || die "MAIL_HOSTNAME is missing from $BUNDLE_DIR/.env"
+    validate_hostname
 
     if ! $ASSUME_YES; then
         [[ -t 0 ]] || die "non-interactive use requires --yes"
@@ -922,6 +929,7 @@ finalize_command() {
         [[ "$answer" =~ ^[Yy]$ ]] || die "finalization cancelled"
     fi
 
+    build_and_install_mailctl
     log "Registering Certbot TLS with Stalwart"
     "$MAILCTL_BIN" configure-tls --directory "$BUNDLE_DIR"
     log "Removing temporary recovery access"
