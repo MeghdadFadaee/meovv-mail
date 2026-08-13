@@ -49,6 +49,7 @@ jobs:
           bash -n scripts/install-server.sh
           bash -n scripts/uninstall-server.sh
           sh -n deploy/certbot/deploy-hook.sh
+          bash -c 'source scripts/uninstall-server.sh; ASSUME_YES=true; choose_optional_cleanup; PURGE_PACKAGES=false; purge_host_packages; REMOVE_BUNDLE=false; remove_bundle_checkout'
       - name: Validate Compose configuration
         env:
           MAIL_HOSTNAME: mail.example.com

@@ -36,6 +36,14 @@ REMOVE_BUNDLE=false
 KEEP_CERTIFICATE=false
 FAILURES=0
 
+unexpected_error() {
+    local status=$?
+    printf '\n\033[1;31mERROR:\033[0m uninstall stopped unexpectedly near line %s (exit %d).\n' \
+        "${BASH_LINENO[0]:-unknown}" "$status" >&2
+    exit "$status"
+}
+trap unexpected_error ERR
+
 log() {
     printf '\n\033[1;35m==>\033[0m %s\n' "$*"
 }
@@ -170,12 +178,17 @@ choose_optional_cleanup() {
     if ! $PURGE_PACKAGES; then
         printf '\nDocker, Nginx, and Certbot may be shared with other services.\n'
         read -r -p "Also purge their APT packages and Docker APT source? [y/N] " answer
-        [[ "$answer" =~ ^[Yy]$ ]] && PURGE_PACKAGES=true
+        if [[ "$answer" =~ ^[Yy]$ ]]; then
+            PURGE_PACKAGES=true
+        fi
     fi
     if ! $REMOVE_BUNDLE; then
         read -r -p "Also delete the repository directory $BUNDLE_DIR? [y/N] " answer
-        [[ "$answer" =~ ^[Yy]$ ]] && REMOVE_BUNDLE=true
+        if [[ "$answer" =~ ^[Yy]$ ]]; then
+            REMOVE_BUNDLE=true
+        fi
     fi
+    return 0
 }
 
 confirm_uninstall() {
@@ -311,7 +324,9 @@ remove_local_state() {
 }
 
 purge_host_packages() {
-    $PURGE_PACKAGES || return
+    if ! $PURGE_PACKAGES; then
+        return 0
+    fi
     command -v apt-get >/dev/null 2>&1 || {
         record_failure "APT is unavailable; requested host packages were not purged"
         return
@@ -337,7 +352,9 @@ purge_host_packages() {
 }
 
 remove_bundle_checkout() {
-    $REMOVE_BUNDLE || return
+    if ! $REMOVE_BUNDLE; then
+        return 0
+    fi
     case "$BUNDLE_DIR" in
         /|/bin|/boot|/dev|/etc|/home|/opt|/root|/srv|/tmp|/usr|/var)
             record_failure "refusing to delete unsafe bundle path $BUNDLE_DIR"
@@ -381,4 +398,6 @@ $([[ "$PURGE_PACKAGES" == false ]] && printf 'Docker, Nginx, and Certbot package
 EOF
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi
