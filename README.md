@@ -112,8 +112,10 @@ sudo --preserve-env=CLOUDFLARE_API_TOKEN ./scripts/install-server.sh install \
 unset CLOUDFLARE_API_TOKEN
 ```
 
-Visit the printed HTTPS URL and complete the browser wizard. After creating and
-testing a permanent administrator, finish the security setup:
+Visit the printed HTTPS URL, complete the browser wizard, and save the generated
+permanent-administrator credentials. Then finish the security setup. Finalize
+restarts Stalwart into its persistent configuration and pauses so an interactive
+operator can verify administrator sign-in before recovery access is removed:
 
 ```bash
 sudo ./scripts/install-server.sh finalize
@@ -147,11 +149,15 @@ one-time result shown on the final screen.
 After setup:
 
 ```bash
+docker compose restart stalwart
 ./mailctl configure-tls
 ./mailctl doctor --hostname mail.example.com
 ```
 
-Sign in with the permanent Stalwart administrator, create the dedicated `API_SUBMISSION_USER` account referenced by `.env`, put that account's application password in `secrets/api_submission_password`, verify REST submission, then remove the recovery backdoor:
+Sign in with the permanent Stalwart administrator and verify it before removing
+the recovery backdoor. Then create the dedicated `API_SUBMISSION_USER` account
+referenced by `.env`, put that account's application password in
+`secrets/api_submission_password`, and verify REST submission:
 
 ```bash
 ./mailctl harden

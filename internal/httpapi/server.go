@@ -180,7 +180,7 @@ func (s *Server) setupComplete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = s.Store.Audit(r.Context(), app.RandomID("aud_"), in.AdminEmail, "installation.completed", in.Hostname, in)
-	writeJSON(w, 201, map[string]any{"configured": true, "next": "Save the one-time administrator result, restart Stalwart, verify permanent administrator sign-in, then run mailctl harden.", "mail_core_result": json.RawMessage(bootstrapResult), "dns_checks": []string{"A/AAAA", "MX", "PTR", "SPF", "DKIM", "DMARC", "TLS"}})
+	writeJSON(w, 201, map[string]any{"configured": true, "next": "Save the one-time administrator result, then run install-server.sh finalize. It restarts Stalwart and pauses for permanent administrator sign-in verification before removing recovery access.", "mail_core_result": json.RawMessage(bootstrapResult), "dns_checks": []string{"A/AAAA", "MX", "PTR", "SPF", "DKIM", "DMARC", "TLS"}})
 }
 
 func (s *Server) sessionExchange(w http.ResponseWriter, r *http.Request) {

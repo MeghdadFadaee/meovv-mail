@@ -73,8 +73,9 @@ Usage:
 Commands:
   install   Install Docker, Nginx, and Certbot; initialize the bundle; obtain
             TLS; install proxy/renewal configuration; and start the appliance.
-  finalize  After completing the browser wizard and creating a permanent
-            administrator, register TLS with Stalwart and remove recovery access.
+  finalize  After completing the browser wizard, restart Stalwart into its
+            persistent configuration, register TLS, verify the permanent
+            administrator, and remove recovery access.
   status    Show service, certificate, and local endpoint status without changes.
 
 This script does not modify PTR records, provider firewalls, SSH, or UFW.
@@ -895,8 +896,8 @@ MEOVV Mail prerequisites and services are installed.
 
 Next:
   1. Open https://$MAIL_HOSTNAME and complete the setup wizard.
-  2. Create and verify a permanent Stalwart administrator.
-  3. Run:
+  2. Save the one-time permanent administrator credentials shown by the wizard.
+  3. Run finalization; it restarts Stalwart and pauses for sign-in verification:
        sudo $BUNDLE_DIR/scripts/install-server.sh finalize --bundle-dir $BUNDLE_DIR
 
 Required provider-side work that this script cannot perform:
@@ -924,12 +925,35 @@ finalize_command() {
 
     if ! $ASSUME_YES; then
         [[ -t 0 ]] || die "non-interactive use requires --yes"
-        warn "Finalize removes the temporary Stalwart recovery administrator."
-        read -r -p "Have you completed the wizard and verified a permanent administrator? [y/N] " answer
+        warn "Finalize restarts Stalwart and then removes the temporary recovery administrator."
+        read -r -p "Have you completed the wizard and saved its permanent administrator credentials? [y/N] " answer
         [[ "$answer" =~ ^[Yy]$ ]] || die "finalization cancelled"
     fi
 
     build_and_install_mailctl
+    log "Restarting Stalwart into its persistent configuration"
+    compose restart stalwart
+
+    local attempt stalwart_ready=false
+    for attempt in {1..30}; do
+        if curl --fail --silent --show-error --max-time 3 \
+            http://127.0.0.1:8081/.well-known/jmap >/dev/null; then
+            stalwart_ready=true
+            break
+        fi
+        sleep 2
+    done
+    if [[ "$stalwart_ready" != true ]]; then
+        compose ps
+        die "Stalwart did not become ready after its post-bootstrap restart"
+    fi
+
+    if ! $ASSUME_YES; then
+        printf '\nStalwart is now running its persistent configuration.\n'
+        read -r -p "Can you sign in with the permanent administrator shown by the wizard? [y/N] " answer
+        [[ "$answer" =~ ^[Yy]$ ]] || die "finalization stopped; recovery access remains enabled"
+    fi
+
     log "Registering Certbot TLS with Stalwart"
     "$MAILCTL_BIN" configure-tls --directory "$BUNDLE_DIR"
     log "Removing temporary recovery access"

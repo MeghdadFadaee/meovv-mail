@@ -29,12 +29,16 @@ secrets directory, installs the renewal hook, and starts both containers.
 It deliberately leaves DNS, PTR records, provider firewall rules, SSH, and UFW
 to the operator unless the optional Cloudflare DNS prompt is accepted. It also
 stops when it finds a conflicting unmanaged Nginx site or container package
-rather than replacing an existing setup. After the browser wizard and permanent
-administrator verification, run:
+rather than replacing an existing setup. After the browser wizard, save the
+generated permanent-administrator credentials and run:
 
 ```bash
 sudo ./scripts/install-server.sh finalize
 ```
+
+Finalization restarts Stalwart so it leaves its in-memory bootstrap mode, waits
+for the persistent configuration to become ready, and pauses for administrator
+sign-in verification before removing recovery access.
 
 The rest of this document describes the same integration for manual installs
 and explains the files managed by the installer.
@@ -130,7 +134,14 @@ the temporary recovery account, register the mounted files with Stalwart:
 
 ```bash
 docker compose up -d --build --remove-orphans
+docker compose restart stalwart
 ./mailctl configure-tls
+```
+
+Sign in with the permanent administrator shown by the wizard. Only after that
+account is verified, remove temporary recovery access:
+
+```bash
 ./mailctl harden
 ```
 

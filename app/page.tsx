@@ -348,7 +348,7 @@ function SetupWizard({ onComplete }: { onComplete: () => void }) {
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Setup failed."); }
     finally { setBusy(false); }
   };
-  if (bootstrapResult) return <div className="setup-finished"><div><span className="step-icon"><CheckCircle2 /></span><h1>Your mail appliance is configured.</h1><p>Save the one-time mail-core result below, restart the mail core, verify the permanent administrator account, and remove recovery access with <code>mailctl harden</code>.</p><pre>{JSON.stringify(bootstrapResult, null, 2)}</pre><div className="setup-warning"><ShieldCheck />This result is not stored by MEOVV Mail.</div><button className="primary" onClick={onComplete}>I saved it — continue to sign in <ArrowRight /></button></div></div>;
+  if (bootstrapResult) return <div className="setup-finished"><div><span className="step-icon"><CheckCircle2 /></span><h1>Your mail appliance is configured.</h1><p>Save the one-time mail-core result below, then run <code>sudo ./scripts/install-server.sh finalize</code> on the server. Finalization restarts the mail core and pauses so you can verify this administrator before recovery access is removed.</p><pre>{JSON.stringify(bootstrapResult, null, 2)}</pre><div className="setup-warning"><ShieldCheck />This result is not stored by MEOVV Mail.</div><button className="primary" onClick={onComplete}>I saved it — show sign in <ArrowRight /></button></div></div>;
   return (
     <div className="setup-screen">
       <aside className="setup-aside">
