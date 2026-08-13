@@ -62,8 +62,9 @@ The hostname's A/AAAA record must already point to the server and inbound port
 80 must be reachable so Let's Encrypt can issue the certificate. The installer
 does not change DNS, PTR, provider firewall rules, SSH, or UFW. It detects
 unmanaged Nginx hostname conflicts and conflicting Docker packages instead of
-overwriting or removing them. Use `--yes` only for a reviewed, non-interactive
-installation.
+overwriting or removing them. If Docker is already installed without Compose
+v2, it adds the matching Compose package from the configured APT repositories.
+Use `--yes` only for a reviewed, non-interactive installation.
 
 Visit the printed HTTPS URL and complete the browser wizard. After creating and
 testing a permanent administrator, finish the security setup:

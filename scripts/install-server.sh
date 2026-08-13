@@ -199,6 +199,34 @@ install_base_packages() {
         python3-certbot-nginx
 }
 
+package_is_installed() {
+    dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -Fq 'install ok installed'
+}
+
+install_compose_for_existing_docker() {
+    local candidates=()
+    if package_is_installed docker-ce || package_is_installed docker-ce-cli; then
+        candidates=(docker-compose-plugin docker-compose-v2)
+    else
+        candidates=(docker-compose-v2 docker-compose-plugin)
+    fi
+
+    local package
+    for package in "${candidates[@]}"; do
+        if apt-cache show "$package" >/dev/null 2>&1; then
+            log "Installing $package for the existing Docker Engine"
+            if apt-get install -y --no-install-recommends "$package" && \
+               docker compose version >/dev/null 2>&1; then
+                systemctl enable --now docker
+                docker compose version
+                return
+            fi
+        fi
+    done
+
+    die "Docker is installed, but no compatible Compose v2 package is available from the configured APT repositories"
+}
+
 install_docker() {
     if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
         log "Docker Engine and Compose are already installed"
@@ -207,12 +235,13 @@ install_docker() {
     fi
 
     if command -v docker >/dev/null 2>&1; then
-        die "Docker is installed without a working Compose plugin; resolve that installation before continuing"
+        install_compose_for_existing_docker
+        return
     fi
 
     local conflicting_packages=() package
     for package in docker.io docker-compose docker-compose-v2 podman-docker containerd runc; do
-        if dpkg-query -W -f='${Status}' "$package" 2>/dev/null | grep -Fq 'install ok installed'; then
+        if package_is_installed "$package"; then
             conflicting_packages+=("$package")
         fi
     done
