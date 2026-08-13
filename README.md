@@ -34,7 +34,7 @@ Mail bodies and attachments never enter the MEOVV SQLite database.
 
 ## Host requirements
 
-- Ubuntu 24.04 or Debian 13 on amd64 or arm64
+- Ubuntu 24.04, Ubuntu 26.04, or Debian 13 on amd64 or arm64
 - Docker Engine with the Compose plugin
 - Host-managed Nginx and Certbot
 - 4 vCPU, 8 GB RAM, and SSD storage for the reference 500-account deployment
@@ -46,11 +46,11 @@ Direct delivery also needs working reverse DNS and acceptable IP reputation. If 
 
 ## Install
 
-For a fresh Ubuntu 24.04 or Debian 13 server, clone this repository and run the
-host installer from the repository root. It installs Docker Engine with the
-Compose plugin, Nginx, Certbot, and required host utilities; initializes MEOVV;
-obtains the first Let's Encrypt certificate; installs renewal and proxy
-configuration; and starts the appliance:
+For a fresh Ubuntu 24.04, Ubuntu 26.04, or Debian 13 server, clone this
+repository and run the host installer from the repository root. It installs
+Docker Engine with the Compose plugin, Nginx, Certbot, and required host
+utilities; initializes MEOVV; obtains the first Let's Encrypt certificate;
+installs renewal and proxy configuration; and starts the appliance:
 
 ```bash
 sudo ./scripts/install-server.sh install \

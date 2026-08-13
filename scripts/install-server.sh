@@ -45,7 +45,7 @@ trap cleanup EXIT
 
 usage() {
     cat <<'EOF'
-Install and operate MEOVV Mail prerequisites on Ubuntu 24.04 or Debian 13.
+Install and operate MEOVV Mail prerequisites on Ubuntu 24.04/26.04 or Debian 13.
 
 Usage:
   sudo ./scripts/install-server.sh install \
@@ -164,13 +164,16 @@ detect_platform() {
 
     case "${ID:-}" in
         ubuntu)
-            [[ "${VERSION_ID:-}" == "24.04" ]] || die "Ubuntu 24.04 is required; found ${VERSION_ID:-unknown}"
+            case "${VERSION_ID:-}" in
+                24.04|26.04) ;;
+                *) die "supported Ubuntu releases are 24.04 and 26.04; found ${VERSION_ID:-unknown}" ;;
+            esac
             ;;
         debian)
             [[ "${VERSION_ID:-}" == "13" ]] || die "Debian 13 is required; found ${VERSION_ID:-unknown}"
             ;;
         *)
-            die "supported systems are Ubuntu 24.04 and Debian 13; found ${ID:-unknown}"
+            die "supported systems are Ubuntu 24.04/26.04 and Debian 13; found ${ID:-unknown}"
             ;;
     esac
 

@@ -20,11 +20,11 @@ sudo ./scripts/install-server.sh install \
 ```
 
 Run it from the cloned repository root, or pass the repository's absolute path
-with `--bundle-dir`. It supports Ubuntu 24.04 and Debian 13. Before running it,
-point the hostname's A/AAAA record at the server and allow inbound port 80. The
-script obtains a certificate using Certbot's webroot flow, enables the final
-route split, copies the certificate into MEOVV's protected secrets directory,
-installs the renewal hook, and starts both containers.
+with `--bundle-dir`. It supports Ubuntu 24.04, Ubuntu 26.04, and Debian 13.
+Before running it, point the hostname's A/AAAA record at the server and allow
+inbound port 80. The script obtains a certificate using Certbot's webroot flow,
+enables the final route split, copies the certificate into MEOVV's protected
+secrets directory, installs the renewal hook, and starts both containers.
 
 It deliberately leaves DNS, PTR records, provider firewall rules, SSH, and UFW
 to the operator. It also stops when it finds a conflicting unmanaged Nginx site

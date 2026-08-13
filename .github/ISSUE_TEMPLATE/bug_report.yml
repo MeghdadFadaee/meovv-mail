@@ -20,6 +20,8 @@ body:
       options:
         - Ubuntu 24.04 amd64
         - Ubuntu 24.04 arm64
+        - Ubuntu 26.04 amd64
+        - Ubuntu 26.04 arm64
         - Debian 13 amd64
         - Debian 13 arm64
         - Development workstation
